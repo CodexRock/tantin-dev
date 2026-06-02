@@ -1,0 +1,11 @@
+# Test tags.
+#
+# `golden`: alchemist auto-applies this tag to every golden test. Golden tests
+# render real pixels (shadows, gradients, blur, SVG) which Skia rasterizes
+# slightly differently per OS — so Windows-authored baselines fail on the Linux
+# CI runner. We therefore run goldens LOCALLY (on the platform where baselines
+# are valid) and EXCLUDE them in CI via `flutter test --exclude-tags golden`
+# (see tool/verify.dart --ci and DECISIONS D011). Declaring the tag here also
+# silences the "tag was used that wasn't specified" warning.
+tags:
+  golden:

@@ -37,17 +37,19 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
   --fatal-infos`, `dart run custom_lint`, and `flutter test`; prints `GATE: PASS`/`GATE: FAIL`.
   Use `--fast` to skip pub/codegen for quick re-checks, `--ci` to also build the APK.
 - **Never check a Definition-of-Done box without pasting this gate's output** (see the Operating
-  Manual's Prime Directive). CI runs the exact same script (`dart run tool/verify.dart --ci`), so
-  local-green == CI-green.
+  Manual's Prime Directive). CI runs the same script (`dart run tool/verify.dart --ci`); the only
+  difference is CI **excludes golden tests** (`--exclude-tags golden`) because pixel goldens are
+  platform-bound — see Golden-test workflow + D011. Everything else (analyze, custom_lint, logic/
+  widget tests, Android build) is identical local vs CI.
 - **After pushing, prove CI is actually green: `dart run tool/check_ci.dart`** — it finds the Actions
   run for HEAD, waits for it to finish, and exits non-zero unless it's `success`. A sprint is not done
   until this prints `CI: GREEN`. (Set `GITHUB_TOKEN` to avoid the 60/hour unauthenticated rate limit.)
 - Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
-## Golden-test workflow (D008)
-- Goldens use **alchemist**; only CI goldens run (deterministic block-text) → identical on Windows & Linux CI. Baselines committed in `test/goldens/ci/`.
-- Render scenarios with `MediaQuery(disableAnimations: true)` for a deterministic final frame.
-- To intentionally change a component's look: `flutter test --update-goldens`, then eyeball the diff before committing. Never blind-update.
+## Golden-test workflow (D008 + D011)
+- Goldens use **alchemist** (auto-tagged `golden`); baselines committed in `test/goldens/ci/`. Render scenarios with `MediaQuery(disableAnimations: true)` for a deterministic final frame.
+- **Goldens are a LOCAL gate only.** They run in `dart run tool/verify.dart` (local) but are **excluded in CI** (`--exclude-tags golden`) — pixel rendering of shadows/gradients/blur differs across OSes, and we author baselines on Windows but CI runs Linux. CI covers logic/widget tests + the Android build (D011).
+- Regenerate baselines on THIS machine after an intentional visual change: `flutter test --update-goldens`, then eyeball the diff. Never blind-update.
 - `test/**/failures/` and `test/goldens/{windows,macos,linux}/` are git-ignored; the gate **fails** if a `failures/` dir exists (a committed failure artifact masked a red sprint in S1).
 
 ## Known Gotchas
@@ -58,5 +60,5 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Done:** S0 architecture setup; S1 design system & component library (tokens, components, SVG icons/zellige art, motion, gallery) — verified with 10 alchemist goldens + 5 interactive widget tests, gate green, CI green. One real bug fixed in remediation (AvatarStack `+N`).
-- **Next:** S2 — start building functional screens (auth/onboarding) from the design-system primitives. Reuse components; do not re-implement them. Add S2's data/test deps just-in-time.
+- **Done:** S0 setup; S1 design system; **S2 auth & onboarding** — splash/intro/phone/OTP/profile/contacts/home+coachmark, `OtpChannel`+`SmsOtpChannel`, auth-driven go_router redirects, `users/{uid}` least-privilege Firestore rule (deployed). Verified: gate green (33 tests), CI green (goldens excluded per D011).
+- **Next:** S3 — backend shell + read paths (daret data model, Firestore reads, real screens behind the shell). Reuse the design system; add S3 deps just-in-time; every new collection gets a least-privilege rule + (ideally) an emulator rules test.

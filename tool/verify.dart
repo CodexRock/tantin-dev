@@ -59,7 +59,14 @@ Future<void> main(List<String> args) async {
     // CI historically skipped this, which is exactly why a crashing plugin went
     // unnoticed. Never remove this step.
     const _Step('Custom lint (riverpod)', 'dart', ['run', 'custom_lint']),
-    const _Step('Tests', 'flutter', ['test']),
+    // Golden tests are platform-sensitive (Skia rasterizes shadows/gradients/
+    // blur/SVG differently per OS). Baselines are authored on the dev's machine,
+    // so goldens run LOCALLY but are EXCLUDED in CI (Linux). CI still runs all
+    // logic/widget tests + the Android build. See DECISIONS D011.
+    _Step('Tests', 'flutter', [
+      'test',
+      if (ci) ...['--exclude-tags', 'golden'],
+    ]),
     if (ci)
       const _Step('Android debug build', 'flutter', [
         'build',
