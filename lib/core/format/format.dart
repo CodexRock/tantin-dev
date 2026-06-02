@@ -6,8 +6,8 @@ abstract class TantinFormat {
   /// Formats an amount to Dirhams.
   /// Example: 1500 -> "1 500 DH"
   static String fmtDH(num amount) {
-    // NumberFormat with fr_MA uses narrow non-breaking space (U+202F) by default
-    // We replace it to standard space as requested
+    // NumberFormat with fr_MA uses a narrow non-breaking space (U+202F) by
+    // default; we replace it with a standard space as requested.
     final formatted = _numberFormat
         .format(amount)
         .replaceAll('\u202F', ' ')

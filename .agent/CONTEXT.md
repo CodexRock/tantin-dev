@@ -30,9 +30,12 @@ The project is currently in the initial setup phase. A Flutter app (`tantin_flut
 - CI via GitHub Actions runs on every push.
 
 ## Known Gotchas
-- Firestore is currently in Native Mode with open test rules. S3 will implement full least-privilege rules.
+- Firestore (Native Mode) now has a **baseline `request.auth != null` rule deployed** (no longer open test mode). Full least-privilege state-machine rules come in a later sprint.
+- **Storage rules are NOT yet deployed:** `storage.rules` + `firebase.json` are ready, but `firebase deploy --only storage` fails with "Failed to fetch default storage bucket" — the default bucket isn't provisioned/reachable yet. **User follow-up:** finish Storage setup in the Firebase console (Storage → Get started, region europe-west1), then re-run `firebase deploy --only storage --project tantin-dev`. Not blocking S0/S1 (no feature uses Storage yet).
+- Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
+- Dependency set is intentionally minimal (just-in-time). Packages for animation/confetti/SVG/contacts/image-picker/permissions and test tooling (mocktail, fake_cloud_firestore, golden testing, integration_test) are added in the sprint that first needs them — S1 adds its UI/test deps.
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Done:** S0 architecture setup.
-- **Next:** S1 Component library & Design system.
+- **Done:** S0 architecture setup (verified: `flutter analyze` 0 issues, `dart run custom_lint` 0 issues, 4/4 tests pass, baseline Firestore rules deployed).
+- **Next:** S1 Component library & Design system. S1 must: add UI/test dependencies, build the component library to pixel-parity with the prototype (golden tests), and wire real screens into the router shell.

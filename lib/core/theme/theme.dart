@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'tokens.dart';
+import 'package:tantin_flutter/core/theme/tokens.dart';
 
 abstract class TantinTheme {
   static ThemeData get lightTheme {
@@ -10,9 +10,8 @@ abstract class TantinTheme {
     return ThemeData(
       useMaterial3: true,
       scaffoldBackgroundColor: TantinColors.ivorySurface,
-      colorScheme: ColorScheme.light(
+      colorScheme: const ColorScheme.light(
         primary: TantinColors.majorelle,
-        onPrimary: Colors.white,
         secondary: TantinColors.saffron,
         onSecondary: Colors.white,
         error: TantinColors.danger,

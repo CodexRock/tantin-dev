@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 /// Stubs for motion helpers (full implementation in S1)
 class Reveal extends StatelessWidget {
+  const Reveal({required this.child, super.key, this.delay = Duration.zero});
+
   final Widget child;
   final Duration delay;
-
-  const Reveal({super.key, required this.child, this.delay = Duration.zero});
 
   @override
   Widget build(BuildContext context) {
@@ -15,9 +15,9 @@ class Reveal extends StatelessWidget {
 }
 
 class FadeIn extends StatelessWidget {
-  final Widget child;
+  const FadeIn({required this.child, super.key});
 
-  const FadeIn({super.key, required this.child});
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
@@ -26,10 +26,10 @@ class FadeIn extends StatelessWidget {
 }
 
 class Pressable extends StatelessWidget {
+  const Pressable({required this.child, super.key, this.onPressed});
+
   final Widget child;
   final VoidCallback? onPressed;
-
-  const Pressable({super.key, required this.child, this.onPressed});
 
   @override
   Widget build(BuildContext context) {

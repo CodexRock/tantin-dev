@@ -4,7 +4,7 @@ part 'smoke_model.freezed.dart';
 part 'smoke_model.g.dart';
 
 @freezed
-class SmokeModel with _$SmokeModel {
+abstract class SmokeModel with _$SmokeModel {
   const factory SmokeModel({
     required String id,
     required String name,

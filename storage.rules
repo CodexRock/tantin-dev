@@ -1,0 +1,9 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Baseline (S0): authenticated access only. Tightened in a later sprint.
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

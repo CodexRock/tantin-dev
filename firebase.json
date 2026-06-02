@@ -1,1 +1,28 @@
-{"firestore":{"rules":"firestore.rules"},"flutter":{"platforms":{"android":{"default":{"projectId":"tantin-dev","appId":"1:619308900387:android:e6b910ba8ee352277ad196","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"tantin-dev","configurations":{"android":"1:619308900387:android:e6b910ba8ee352277ad196","ios":"1:619308900387:ios:f6830e9a920047ad7ad196"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "tantin-dev",
+          "appId": "1:619308900387:android:e6b910ba8ee352277ad196",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "tantin-dev",
+          "configurations": {
+            "android": "1:619308900387:android:e6b910ba8ee352277ad196",
+            "ios": "1:619308900387:ios:f6830e9a920047ad7ad196"
+          }
+        }
+      }
+    }
+  }
+}

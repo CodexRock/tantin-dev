@@ -1,20 +1,19 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter/services.dart';
 import 'dart:ui';
 
-import 'firebase_options.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:tantin_flutter/core/router/router.dart';
+import 'package:tantin_flutter/core/theme/theme.dart';
+import 'package:tantin_flutter/firebase_options.dart';
 import 'package:tantin_flutter/l10n/app_localizations.dart';
-import 'core/theme/theme.dart';
-import 'core/router/router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
