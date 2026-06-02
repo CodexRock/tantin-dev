@@ -1,6 +1,6 @@
 # Tant'in Context
 
-**Current Sprint:** S1 complete (audited + remediated) → S2 next
+**Current Sprint:** S3 Parts 1-2 checkpoint - locally verified, architect audit pending
 
 ## Project Status
 Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
@@ -13,6 +13,11 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 ## Architecture & Folder Map
 - `lib/core/`: Application-wide concerns (routing, formatting, tokens, theme, providers, motion).
 - `lib/core/firebase/`: Exposes Firebase services via Riverpod providers.
+- `lib/core/firebase/firestore_helpers.dart`: Shared Firestore `Timestamp`/map/list conversion helpers.
+- `lib/features/darets/`: Freezed daret/member/period/contribution/invite models, pure domain logic,
+  Firestore mappers, stream repositories, Riverpod providers, and callable wrappers.
+- `lib/features/profile/`, `lib/features/activity/`, `lib/features/notifications/`: Typed domain
+  entities, Firestore mappers, repositories, and Riverpod stream providers for S3 read paths.
 - `lib/core/motion/`: Reveal, FadeIn, Pressable, StaggeredReveal, page transitions, confetti — all reduced-motion aware via `MediaQuery.disableAnimationsOf`.
 - `lib/design_system/`: `components/` (Avatar, Button, Card, CountUp, EmptyBlock, ProgressRing, ScreenHeader, Segmented, Sheet, Skel, StateBadge, Toast), `icons/` (TnIcons), `art/` (TnArt zellige), `gallery/` (dev route), and `design_system.dart` barrel. Components reference `core/theme` tokens only — no literal hex/spacing.
 - `lib/l10n/`: French localization (ARB files).
@@ -23,6 +28,8 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - **Feature-first architecture:** Upcoming sprints will organize by feature (e.g. `lib/features/daret/`).
 - **State Management:** Riverpod 2 with codegen (`riverpod_annotation`, `riverpod_generator`).
 - **Models:** `freezed` + `json_serializable`.
+- **Firestore mapping:** Domain entities serialize JSON with generated code; Firestore mappers are
+  explicit so `Timestamp` conversion and document IDs stay visible and testable.
 - **Language:** French only (`app_fr.arb`).
 - **Currency:** Dirham, formatted via `TantinFormat.fmtDH` with spaces (e.g. `1 500 DH`).
 
@@ -30,6 +37,10 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `flutter pub get`: Fetch dependencies.
 - `dart run build_runner build --delete-conflicting-outputs`: Generate Riverpod providers, Freezed models, JSON serialization, and GoRouter routes.
 - `flutter gen-l10n`: Generate localizations.
+- `npm install`: Resolve the pinned backend rules-test toolchain and refresh `package-lock.json`.
+- `npm test`: Run Firestore + Storage allow/deny rules tests in emulators using `firebase.test.json`.
+- The backend test harness applies scoped `uuid ^11.1.1` npm overrides under `gaxios` and
+  `universal-analytics`; `npm audit --json` must remain clean (D016).
 
 ## Testing & CI
 - **Canonical gate: `dart run tool/verify.dart`** — the single source of truth for "is it green?".
@@ -47,12 +58,18 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
 ## Golden-test workflow (D008 + D011)
+- CI has a second `backend` job for `npm ci` + emulator rules tests. Functions Jest tests are added to
+  this backend lane in S3 Part 3 when `functions/` lands.
 - Goldens use **alchemist** (auto-tagged `golden`); baselines committed in `test/goldens/ci/`. Render scenarios with `MediaQuery(disableAnimations: true)` for a deterministic final frame.
 - **Goldens are a LOCAL gate only.** They run in `dart run tool/verify.dart` (local) but are **excluded in CI** (`--exclude-tags golden`) — pixel rendering of shadows/gradients/blur differs across OSes, and we author baselines on Windows but CI runs Linux. CI covers logic/widget tests + the Android build (D011).
 - Regenerate baselines on THIS machine after an intentional visual change: `flutter test --update-goldens`, then eyeball the diff. Never blind-update.
 - `test/**/failures/` and `test/goldens/{windows,macos,linux}/` are git-ignored; the gate **fails** if a `failures/` dir exists (a committed failure artifact masked a red sprint in S1).
 
 ## Known Gotchas
+- S3 least-privilege Firestore + Storage rules are implemented locally but **not deployed yet**:
+  deploy only after the Part 2 security audit and a fresh green emulator run.
+- `firebase.test.json` intentionally avoids the live Storage target. Emulator tests use isolated
+  project ID `tantin-rules-test`; live deploys continue to use `firebase.json` + target `main`.
 - Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
 - **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
 - Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
@@ -60,5 +77,10 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
+- **Current checkpoint:** S3 Parts 1-2 only. Domain models/logic, repositories, rules, indexes, Storage
+  tightening, emulator tests, and backend CI lane are implemented locally. Local proof: `npm audit`
+  has zero vulnerabilities, `npm test` passes 19 emulator assertions, and `dart run tool/verify.dart`
+  passes with 47 tests. Do not deploy or start Functions/screens until the architect approves this
+  security checkpoint.
 - **Done:** S0 setup; S1 design system; **S2 auth & onboarding** — splash/intro/phone/OTP/profile/contacts/home+coachmark, `OtpChannel`+`SmsOtpChannel`, auth-driven go_router redirects, `users/{uid}` least-privilege Firestore rule (deployed). Verified: gate green (33 tests), CI green (goldens excluded per D011).
 - **Next:** S3 — backend shell + read paths (daret data model, Firestore reads, real screens behind the shell). Reuse the design system; add S3 deps just-in-time; every new collection gets a least-privilege rule + (ideally) an emulator rules test.

@@ -48,3 +48,40 @@
 - **Decision:** Added `pinput`, `image_picker`, `permission_handler`, `flutter_contacts` via `flutter pub add`. All versions are pinned to caret ranges in pubspec.yaml.
 - **Rationale:** These packages are required for the Auth & Onboarding flow (OTP screen, profile photo upload, and contacts permission ask). Added just-in-time per the operating manual.
 
+## D012: Explicit Firestore mapping around immutable S3 domain entities
+- **Decision:** S3 domain entities are Freezed + JSON serializable, while Firestore conversion lives
+  in explicit mapper classes. Shared helpers convert `Timestamp`, string lists, and nested maps.
+- **Rationale:** Firestore documents carry document IDs and `Timestamp` values that should not leak
+  into pure domain logic. Explicit mapping keeps the offline snapshot read path typed without hiding
+  security-relevant field names behind dynamic conversion.
+
+## D013: Rules emulator harness uses a separate Firebase config
+- **Decision:** Add root `package.json`/`package-lock.json`, `rules-tests/`, and `firebase.test.json`.
+  `npm test` starts isolated Firestore + Storage emulators under project ID `tantin-rules-test`.
+  `firebase.test.json` references the same committed rules but does not use the live Storage deploy
+  target. CI has a second `backend` job running `npm ci` + `npm test`.
+- **Rationale:** The live `firebase.json` Storage target `main` is scoped to `tantin-dev`, so using it
+  with an isolated emulator project fails before tests start. A test-only config preserves deployment
+  safety while making the allow/deny suite reproducible in CI.
+
+## D014: Upgrade firebase-tools after npm audit findings
+- **Decision:** Use `firebase-tools ^15.19.0` for the rules harness. Keep `@firebase/rules-unit-testing
+  ^5.0.0`, `firebase ^12.2.1`, and `jest ^30.1.3` as explicit caret ranges.
+- **Rationale:** The first install resolved `firebase-tools 14.27.0`; `npm audit` reported five
+  advisories through its transitive `gaxios`, `tar`, and `uuid` dependencies, including high-severity
+  path traversal findings. npm identified `firebase-tools 15.19.0` as the remediation.
+
+## D016: Scoped UUID overrides for the firebase-tools test harness
+- **Decision:** Add npm overrides forcing `uuid ^11.1.1` only under `gaxios` and
+  `universal-analytics`.
+- **Rationale:** After upgrading to `firebase-tools 15.19.0`, npm still reported four moderate
+  dev-tool-only advisories because those two nested dependencies retained older UUID ranges. The
+  scoped override removed the advisories without changing app runtime dependencies. Verified with
+  `npm audit --json` (zero vulnerabilities) and the emulator suite (19 tests passed).
+
+## D015: Canonical profile schema and self-only avatar path
+- **Decision:** The onboarding profile write now uses canonical `users/{uid}` French-key fields and
+  uploads photos to `users/{uid}/avatar.jpg`. The legacy profile adapter can still read S2
+  `firstName`/`lastName` keys during migration.
+- **Rationale:** Tight Storage rules require a UID-scoped avatar path. The previous raw string
+  `r'avatars/${user.uid}.jpg'` uploaded to a literal interpolation path and did not match the S3 model.
