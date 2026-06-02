@@ -48,17 +48,19 @@ class Segmented<T> extends StatelessWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      option.label,
-                      style: TextStyle(
-                        color: active
-                            ? TantinColors.ink
-                            : TantinColors.inkMuted,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                    Flexible(
+                      child: Text(
+                        option.label,
+                        style: TextStyle(
+                          color: active
+                              ? TantinColors.ink
+                              : TantinColors.inkMuted,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                     if (option.count != null) ...[
                       const SizedBox(width: 5),

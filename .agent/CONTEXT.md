@@ -1,16 +1,18 @@
 # Tant'in Context
 
-**Current Sprint:** S0
+**Current Sprint:** S1 complete (audited + remediated) → S2 next
 
 ## Project Status
-The project is currently in the initial setup phase. A Flutter app (`tantin_flutter`) has been scaffolded and connected to the `tantin-dev` Firebase project. Design tokens, theming, Riverpod codegen, go_router, and l10n have been wired up. The app boots to a placeholder 5-tab shell.
+Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project (S0), with the full design system + component library built and golden-tested (S1). The app boots to a placeholder 5-tab shell; a dev-only gallery route renders every component.
 
 ## Architecture & Folder Map
-- `lib/core/`: Application-wide concerns (routing, formatting, tokens, theme, providers).
+- `lib/core/`: Application-wide concerns (routing, formatting, tokens, theme, providers, motion).
 - `lib/core/firebase/`: Exposes Firebase services via Riverpod providers.
+- `lib/core/motion/`: Reveal, FadeIn, Pressable, StaggeredReveal, page transitions, confetti — all reduced-motion aware via `MediaQuery.disableAnimationsOf`.
+- `lib/design_system/`: `components/` (Avatar, Button, Card, CountUp, EmptyBlock, ProgressRing, ScreenHeader, Segmented, Sheet, Skel, StateBadge, Toast), `icons/` (TnIcons), `art/` (TnArt zellige), `gallery/` (dev route), and `design_system.dart` barrel. Components reference `core/theme` tokens only — no literal hex/spacing.
 - `lib/l10n/`: French localization (ARB files).
-- `lib/main.dart`: Entrypoint, Firebase initialization, App Check, Crashlytics, Analytics, `SystemUiOverlayStyle`.
-- `test/`: Unit and widget tests.
+- `lib/main.dart`: Entrypoint, Firebase init, App Check, Crashlytics, Analytics, `SystemUiOverlayStyle`.
+- `test/`: unit + widget tests, golden tests (`design_system_test.dart`), goldens in `test/goldens/ci/`.
 
 ## Key Conventions
 - **Feature-first architecture:** Upcoming sprints will organize by feature (e.g. `lib/features/daret/`).
@@ -34,13 +36,19 @@ The project is currently in the initial setup phase. A Flutter app (`tantin_flut
   local-green == CI-green.
 - Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
+## Golden-test workflow (D008)
+- Goldens use **alchemist**; only CI goldens run (deterministic block-text) → identical on Windows & Linux CI. Baselines committed in `test/goldens/ci/`.
+- Render scenarios with `MediaQuery(disableAnimations: true)` for a deterministic final frame.
+- To intentionally change a component's look: `flutter test --update-goldens`, then eyeball the diff before committing. Never blind-update.
+- `test/**/failures/` and `test/goldens/{windows,macos,linux}/` are git-ignored; the gate **fails** if a `failures/` dir exists (a committed failure artifact masked a red sprint in S1).
+
 ## Known Gotchas
-- Firestore (Native Mode) now has a **baseline `request.auth != null` rule deployed** (no longer open test mode). Full least-privilege state-machine rules come in a later sprint.
-- **Storage rules are NOT yet deployed:** `storage.rules` + `firebase.json` are ready, but `firebase deploy --only storage` fails with "Failed to fetch default storage bucket" — the default bucket isn't provisioned/reachable yet. **User follow-up:** finish Storage setup in the Firebase console (Storage → Get started, region europe-west1), then re-run `firebase deploy --only storage --project tantin-dev`. Not blocking S0/S1 (no feature uses Storage yet).
+- Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
+- **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
 - Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
-- Dependency set is intentionally minimal (just-in-time). Packages for animation/confetti/SVG/contacts/image-picker/permissions and test tooling (mocktail, fake_cloud_firestore, golden testing, integration_test) are added in the sprint that first needs them — S1 adds its UI/test deps.
+- Dependency set is just-in-time. Remaining packages (confetti is in via motion; contacts/image-picker/permissions, mocktail, fake_cloud_firestore, integration_test) are added in the sprint that first needs them.
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Done:** S0 architecture setup, S1 Component library & Design system. Design tokens, shared components, SVG-based icons/zellige art, motion helpers, and gallery are implemented and verified with golden tests.
-- **Next:** S2 (or further feature sprints) to start implementing functional screens using the design system.
+- **Done:** S0 architecture setup; S1 design system & component library (tokens, components, SVG icons/zellige art, motion, gallery) — verified with 10 alchemist goldens + 5 interactive widget tests, gate green, CI green. One real bug fixed in remediation (AvatarStack `+N`).
+- **Next:** S2 — start building functional screens (auth/onboarding) from the design-system primitives. Reuse components; do not re-implement them. Add S2's data/test deps just-in-time.

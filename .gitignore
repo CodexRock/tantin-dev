@@ -39,6 +39,14 @@ migrate_working_dir/
 *.g.dart
 *.freezed.dart
 
+# Golden-test failure artifacts (only created when a golden FAILS — never commit
+# them; the gate also hard-fails if any appear). Alchemist platform goldens are
+# local-only; CI goldens under test/goldens/ci/ ARE committed.
+test/**/failures/
+test/goldens/macos/
+test/goldens/linux/
+test/goldens/windows/
+
 # Symbolication related
 app.*.symbols
 

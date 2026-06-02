@@ -33,6 +33,11 @@ Future<void> main(List<String> args) async {
   // the analyzer plugin). Constraints must be explicit (caret/range).
   _assertNoAnyConstraints();
 
+  // Static guard: a `failures/` dir under test/ only exists when a golden test
+  // FAILED. In S1 such artifacts were committed while the sprint was reported
+  // "done". They must never be in the tree.
+  _assertNoGoldenFailureArtifacts();
+
   final steps = <_Step>[
     if (!fast) const _Step('Resolve dependencies', 'flutter', ['pub', 'get']),
     if (!fast) const _Step('Generate l10n', 'flutter', ['gen-l10n']),
@@ -120,6 +125,25 @@ void _assertNoAnyConstraints() {
     stderr.writeln(
       '❌ Forbidden `any` version constraint(s): ${offenders.join(', ')}.\n'
       '   Pin every dependency to an explicit caret/range (see DECISIONS D004).',
+    );
+    exit(2);
+  }
+}
+
+void _assertNoGoldenFailureArtifacts() {
+  final testDir = Directory('test');
+  if (!testDir.existsSync()) return;
+  final offenders = testDir
+      .listSync(recursive: true)
+      .whereType<Directory>()
+      .where((d) => d.path.replaceAll(r'\', '/').endsWith('/failures'))
+      .toList();
+  if (offenders.isNotEmpty) {
+    stderr.writeln(
+      '❌ Golden-failure artifacts present: '
+      '${offenders.map((d) => d.path).join(', ')}.\n'
+      '   A golden test failed. Fix the component or regenerate goldens '
+      '(`flutter test --update-goldens`); never commit failure images.',
     );
     exit(2);
   }

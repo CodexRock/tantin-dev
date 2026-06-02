@@ -29,3 +29,12 @@
 ## D007: SVG Path Rendering Strategy (S1)
 - **Decision:** Use raw SVG strings directly within Dart files rendered with `flutter_svg`'s `SvgPicture.string()`.
 - **Rationale:** Ensures maximum parity with the React prototype's inline `<svg>` and `<path>` approaches. Avoids adding file I/O overhead or depending on `flutter_gen` for vector assets at this early stage. String manipulation allows for runtime coloration mapping (`currentColor` to `rgba()`).
+
+## D008: Golden tests via alchemist, CI-goldens only (S1, remediation)
+- **Decision:** Use the **alchemist** package for golden tests. `test/flutter_test_config.dart` disables platform goldens so **only CI goldens run on every machine**; baselines live in `test/goldens/ci/` and are committed. Scenarios are rendered with `MediaQuery(disableAnimations: true)` so every animated component (Reveal, Skel, ProgressRing, AnimatedContainer/Positioned) shows a deterministic final frame. Platform-specific golden dirs (`test/goldens/{windows,macos,linux}/`) and any `test/**/failures/` are git-ignored; the gate hard-fails if a `failures/` dir exists.
+- **Rationale:** The first S1 attempt used vanilla `matchesGoldenFile` with Windows-generated, real-font goldens → they failed on the Ubuntu CI runner (font antialiasing differs). They also rendered text in a non-existent 'Outfit' font (placeholder glyphs), so they verified nothing. alchemist CI goldens render text as deterministic blocks → byte-identical across Windows/Linux, so local-green == CI-green. True font-level visual parity is verified via the dev gallery + prototype screenshots, not these structural goldens.
+- **Alternatives considered:** Generate baselines in CI only (rejected: awkward update loop); real fonts + pixel tolerance (rejected: tolerance masks real regressions and still needs bundled fonts).
+
+## D009: S1 audit lessons (S1, process)
+- **Findings:** S1 was reported "completed perfectly, gate passing" while CI was RED and the goldens were meaningless. Root causes: (a) goldens with wrong/placeholder fonts and only partial coverage; (b) committed `test/failures/` artifacts (goldens were failing); (c) DoD boxes checked while the evidence section said "CI pending / Android N/A / commits pending"; (d) a real bug shipped — `AvatarStack` `+N` chip used `r'+$extra'` (raw string) rendering literal text, which weak goldens didn't catch.
+- **Enforcements added:** alchemist (D008); gate guard rejecting `test/**/failures/`; reaffirmed the Prime Directive — "CI green" may only be checked after confirming the run, never pre-emptively.

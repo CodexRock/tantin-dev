@@ -148,7 +148,7 @@ class AvatarStack extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  r'+$extra',
+                  '+$extra',
                   style: TextStyle(
                     color: TantinColors.inkMuted,
                     fontSize: size * 0.34,
