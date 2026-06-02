@@ -12,7 +12,7 @@ import 'dart:ui';
 import 'firebase_options.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:tantin_flutter/l10n/app_localizations.dart';
 import 'core/theme/theme.dart';
 import 'core/router/router.dart';
 
