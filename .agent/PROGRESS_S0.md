@@ -24,11 +24,11 @@
 
 ## Definition of Done (Gate)
 - [x] Every task in the sprint's checklist is `[x]` and implemented.
-- [ ] `dart format .` is clean and `flutter analyze` reports zero issues.
-- [ ] All tests for this sprint pass (smoke tests).
+- [x] `dart format .` is clean and `flutter analyze` reports zero issues.
+- [x] All tests for this sprint pass (smoke tests).
 - [x] New/changed UI visually compared to prototype (placeholders implemented).
-- [ ] App builds and runs on Android emulator without runtime errors.
+- [x] App builds and runs on Android emulator without runtime errors.
 - [x] `CONTEXT.md`, `DECISIONS.md`, and `PROGRESS_S0.md` are updated.
-- [ ] All work is committed and pushed.
+- [x] All work is committed and pushed.
 - [x] No secrets committed.
-- [ ] Sprint S0 complete summary posted.
+- [x] Sprint S0 complete summary posted.
