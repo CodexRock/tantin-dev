@@ -43,5 +43,8 @@ jobs:
     - name: Install backend test dependencies
       run: npm ci
 
-    - name: Test Firestore and Storage rules in emulators
+    - name: Install Functions test dependencies
+      run: npm --prefix functions ci
+
+    - name: Test backend rules and Functions in emulators
       run: npm test

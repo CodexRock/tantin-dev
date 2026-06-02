@@ -2,8 +2,9 @@
   "name": "tantin-backend-tests",
   "private": true,
   "scripts": {
-    "test": "npm run test:rules",
-    "test:rules": "firebase emulators:exec --config firebase.test.json --only firestore,storage \"jest --runInBand rules-tests\" --project tantin-rules-test"
+    "test": "npm run test:rules && npm run test:functions",
+    "test:rules": "firebase emulators:exec --config firebase.test.json --only firestore,storage \"jest --runInBand rules-tests\" --project tantin-rules-test",
+    "test:functions": "npm --prefix functions run build && firebase emulators:exec --config firebase.test.json --only firestore \"npm --prefix functions test -- --runInBand\" --project tantin-rules-test"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

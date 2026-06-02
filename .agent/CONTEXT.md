@@ -1,6 +1,6 @@
 # Tant'in Context
 
-**Current Sprint:** S3 Parts 1-2 checkpoint - local + CI verified, architect audit pending
+**Current Sprint:** S3 Part 3 - Cloud Functions deployed, commit/CI checkpoint pending
 
 ## Project Status
 Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
@@ -16,6 +16,10 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `lib/core/firebase/firestore_helpers.dart`: Shared Firestore `Timestamp`/map/list conversion helpers.
 - `lib/features/darets/`: Freezed daret/member/period/contribution/invite models, pure domain logic,
   Firestore mappers, stream repositories, Riverpod providers, and callable wrappers.
+- `functions/`: TypeScript Cloud Functions v2 in `europe-west1`. Callables wrap testable handlers with
+  zod validation, auth, and App Check checks. Admin SDK writes all server-owned daret integrity fields
+  (`statut`, `currentPeriode`, `memberUids`, period `status`/aggregates, contributions, members,
+  activity, notifications, invites).
 - `lib/features/profile/`, `lib/features/activity/`, `lib/features/notifications/`: Typed domain
   entities, Firestore mappers, repositories, and Riverpod stream providers for S3 read paths.
 - `lib/core/motion/`: Reveal, FadeIn, Pressable, StaggeredReveal, page transitions, confetti — all reduced-motion aware via `MediaQuery.disableAnimationsOf`.
@@ -38,10 +42,29 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `dart run build_runner build --delete-conflicting-outputs`: Generate Riverpod providers, Freezed models, JSON serialization, and GoRouter routes.
 - `flutter gen-l10n`: Generate localizations.
 - `npm install`: Resolve the pinned backend rules-test toolchain and refresh `package-lock.json`.
+- From `functions/`, `npm install`: Resolve the pinned Functions toolchain and refresh
+  `functions/package-lock.json`. Do not use `npm --prefix functions install` from the repo root; npm
+  treats the root package as a `file:..` dependency and creates a junction that makes Dart analysis
+  recurse into generated backend dependencies.
 - `npm test`: Run Firestore + Storage allow/deny rules tests in emulators using `firebase.test.json`.
+  As of S3 Part 3 this also builds `functions/` and runs the Functions Jest suite against the Firestore
+  emulator.
 - Backend emulator tests require Java 21+ because `firebase-tools 15.19.0` rejects older runtimes.
 - The backend test harness applies scoped `uuid ^11.1.1` npm overrides under `gaxios` and
   `universal-analytics`; `npm audit --json` must remain clean (D016).
+- The Functions package applies scoped/global `uuid ^11.1.1` overrides for Firebase Admin's Google
+  client transitive paths; `npm --prefix functions audit --json` must remain clean (D019).
+
+## Dev Seed
+- `seedDev` is an `europe-west1` callable guarded to dev projects and still requires both auth and
+  App Check. It maps the caller's signed-in UID to Yasmine Benali, then writes the canonical `data.js`
+  dataset to Firestore: Yasmine + 12 seed personas, 4 darets, periods, contributions, activity, and
+  notifications.
+- After deploying Functions to `tantin-dev`, sign in on a dev device with the account that should be
+  Yasmine and invoke `DaretCallableRepository.seedDev()` from a debug-only action or one-off debug
+  call. Do not add a persistent production UI for this.
+- The seed is deterministic and idempotent for the canonical docs: Yasmine uses the signed-in UID;
+  other personas use `seed-person-01` through `seed-person-12`; darets use `d1` through `d4`.
 
 ## Testing & CI
 - **Canonical gate: `dart run tool/verify.dart`** — the single source of truth for "is it green?".
@@ -59,8 +82,8 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
 ## Golden-test workflow (D008 + D011)
-- CI has a second `backend` job for `npm ci` + emulator rules tests. Functions Jest tests are added to
-  this backend lane in S3 Part 3 when `functions/` lands.
+- CI has a second `backend` job for root `npm ci`, `npm --prefix functions ci`, and `npm test`. The
+  backend gate covers Firestore/Storage rules tests plus Functions Jest tests.
 - Goldens use **alchemist** (auto-tagged `golden`); baselines committed in `test/goldens/ci/`. Render scenarios with `MediaQuery(disableAnimations: true)` for a deterministic final frame.
 - **Goldens are a LOCAL gate only.** They run in `dart run tool/verify.dart` (local) but are **excluded in CI** (`--exclude-tags golden`) — pixel rendering of shadows/gradients/blur differs across OSes, and we author baselines on Windows but CI runs Linux. CI covers logic/widget tests + the Android build (D011).
 - Regenerate baselines on THIS machine after an intentional visual change: `flutter test --update-goldens`, then eyeball the diff. Never blind-update.
@@ -82,12 +105,10 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Current checkpoint:** S3 Parts 1-2 only. Domain models/logic, repositories, rules, indexes, Storage
-  tightening, emulator tests, and backend CI lane are implemented locally. Local proof: `npm audit`
-  has zero vulnerabilities, `npm test` passes 19 emulator assertions, and user-ran
-  `dart run tool/verify.dart` passes with 47 tests. CI proof:
-  https://github.com/CodexRock/tantin-dev/actions/runs/26849086391 is green for `8bdc6c5`
-  (`backend` + `verify`). Do not deploy or start Functions/screens until the architect approves this
-  security checkpoint.
+- **Current checkpoint:** S3 Part 3 Functions are implemented and deployed to `tantin-dev`; live
+  `firebase functions:list` shows all 13 Functions in `europe-west1`. Local gates pass: root audit
+  clean, Functions audit clean, rules tests pass (19), Functions tests pass (13), and
+  `dart run tool/verify.dart` passes with 47 Flutter tests. Remaining Part 3 work: commit/push and
+  prove GitHub Actions green for the pushed HEAD. Stop before Part 4 screens for architect review.
 - **Done:** S0 setup; S1 design system; **S2 auth & onboarding** — splash/intro/phone/OTP/profile/contacts/home+coachmark, `OtpChannel`+`SmsOtpChannel`, auth-driven go_router redirects, `users/{uid}` least-privilege Firestore rule (deployed). Verified: gate green (33 tests), CI green (goldens excluded per D011).
 - **Next:** S3 — backend shell + read paths (daret data model, Firestore reads, real screens behind the shell). Reuse the design system; add S3 deps just-in-time; every new collection gets a least-privilege rule + (ideally) an emulator rules test.

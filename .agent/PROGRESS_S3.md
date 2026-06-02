@@ -16,8 +16,8 @@ are gated by tested security rules, and privileged Functions exist before read s
 - [x] T4 - Firestore indexes + self-only avatar storage rules
 - [x] T5 - Security-rules emulator allow/deny matrix + CI job
 - [x] T6 - Stream repositories + Riverpod read providers and guarded writes
-- [ ] T7 - Cloud Functions suite
-- [ ] T8 - Canonical dev seed
+- [ ] T7 - Cloud Functions suite (implemented locally; deploy/CI proof pending)
+- [ ] T8 - Canonical dev seed (implemented locally; live seed run pending)
 - [ ] T9 - Real 5-tab shell + FAB sheet
 - [ ] T10 - Accueil read screen
 - [ ] T11 - Mes Darets read screen
@@ -72,6 +72,40 @@ are gated by tested security rules, and privileged Functions exist before read s
 - 2026-06-02 - GitHub Actions run
   https://github.com/CodexRock/tantin-dev/actions/runs/26849086391 for `8bdc6c5` completed green:
   `backend` passed the emulator rules suite and `verify` passed the pinned Flutter gate.
+- 2026-06-03 - Resumed S3 at Part 3 after the architect security sign-off. Confirmed the actual git
+  checkout is `tantinFlutter/`; handoff docs live under `.agent/`; `functions/` did not exist yet.
+- 2026-06-03 - Scaffolded `functions/` TypeScript v2 Functions in `europe-west1`, added zod validation,
+  auth/App Check callable guards, structured logging, deterministic/idempotent trigger writes, and
+  Admin SDK-only writes for daret integrity fields. Added the full §6 inventory: `startDaret`,
+  `createInvite`, `previewDaret`, `joinDaret`, `approveDaret`, `advancePeriod`, `closePeriod`,
+  `closeDaret`, `sendNudge`, `seedDev`, `onContributionWritten`, `onMemberCreated`, and
+  `dailyReminders`.
+- 2026-06-03 - Implemented canonical dev seed as `seedDev`: caller UID maps to Yasmine; the 12
+  remaining prototype personas use stable seed UIDs; writes canonical users, 4 darets, members,
+  periods, contributions, activity, and notifications to Firestore shapes consumed by rules/clients.
+- 2026-06-03 - Wired Functions tests into the root backend gate: `npm test` now runs rules tests and
+  Functions Jest tests; CI backend installs `functions/` dependencies before `npm test`.
+- 2026-06-03 - First Functions install reported nine moderate UUID advisories through Firebase Admin's
+  Google client dependencies. Added Functions-package UUID overrides and rebuilt the nested lockfile;
+  root and Functions audits both report zero vulnerabilities.
+- 2026-06-03 - First Functions emulator run caught two Firestore transaction ordering bugs
+  (`approveDaret`, `closePeriod`). Moved all transaction reads before writes; fresh Functions and full
+  backend gates pass locally.
+- 2026-06-03 - User-ran the canonical Flutter gate after the first Functions implementation; it failed
+  because `npm --prefix functions install` had saved the root package as a `file:..` dependency,
+  creating a `functions/node_modules/tantin-backend-tests` junction that made Dart analysis and
+  custom_lint recurse into Firebase CLI Dart templates. Removed the accidental dependency, regenerated
+  the nested lockfile from inside `functions/`, added `functions/**` to Dart analyzer excludes, and
+  reran gates.
+- 2026-06-03 - Fresh local gates after the npm-junction fix: `npm test` passed rules + Functions, and
+  `dart run tool/verify.dart` passed the canonical Flutter gate with 47 tests.
+- 2026-06-03 - Deployed Firestore rules, Firestore indexes, Storage rules, and Functions to
+  `tantin-dev`. First deploy enabled first-time Gen2 APIs and partially succeeded; `startDaret`,
+  `onContributionWritten`, and `onMemberCreated` initially failed during Cloud Build/Eventarc
+  propagation and Firebase requested an Artifact Registry cleanup policy. Retried Functions with
+  `--force`; all 13 Functions deployed and cleanup policy was configured.
+- 2026-06-03 - Verified live Functions with `firebase functions:list --project tantin-dev`: all
+  callables, both Firestore triggers, and `dailyReminders` are v2, `europe-west1`, `nodejs20`.
 
 ## Verification evidence
 
@@ -189,9 +223,112 @@ verify: success
 CI: GREEN
 ```
 
+### Part 3 root audit - `npm audit --json`
+```
+"vulnerabilities": {
+  "info": 0,
+  "low": 0,
+  "moderate": 0,
+  "high": 0,
+  "critical": 0,
+  "total": 0
+}
+```
+
+### Part 3 Functions audit - `npm --prefix functions audit --json`
+```
+"vulnerabilities": {
+  "info": 0,
+  "low": 0,
+  "moderate": 0,
+  "high": 0,
+  "critical": 0,
+  "total": 0
+}
+```
+
+### Part 3 Functions emulator tests - `npm run test:functions`
+```
+Test Suites: 1 passed, 1 total
+Tests:       13 passed, 13 total
+Snapshots:   0 total
+Time:        12.697 s, estimated 14 s
+Ran all test suites.
+```
+
+### Part 3 backend gate - `npm test`
+```
+Test Suites: 2 passed, 2 total
+Tests:       19 passed, 19 total
+Snapshots:   0 total
+Time:        9.529 s, estimated 24 s
+Ran all test suites matching rules-tests.
+Test Suites: 1 passed, 1 total
+Tests:       13 passed, 13 total
+Snapshots:   0 total
+Time:        12.697 s, estimated 14 s
+Ran all test suites.
+```
+
+### Superseded Part 3 Flutter gate - user-ran before npm-junction fix
+```
+SUMMARY
+  Resolve dependencies: PASS
+  Generate l10n: PASS
+  Codegen reproduces: PASS
+  Format check: PASS
+  Static analysis: FAIL (Dart analyzer entered functions/node_modules Firebase CLI templates)
+  Custom lint (riverpod): FAIL (custom_lint recursed through generated npm junction)
+  Tests: PASS (47 tests)
+GATE: FAIL
+```
+
+### Part 3 canonical gate - `dart run tool/verify.dart`
+```
+SUMMARY
+  Resolve dependencies: PASS
+  Generate l10n: PASS
+  Codegen reproduces: PASS
+  Format check: PASS
+  Static analysis: PASS
+  Custom lint (riverpod): PASS
+Tests: PASS (47 tests)
+GATE: PASS
+```
+
+### Part 3 deploy - `firebase deploy --only "functions,firestore:rules,firestore:indexes,storage" --project tantin-dev`
+```
+firestore: deployed indexes in firestore.indexes.json successfully for (default) database
+storage: released rules storage.rules to firebase.storage
+firestore: released rules firestore.rules to cloud.firestore
+functions created successfully: previewDaret, approveDaret, sendNudge, joinDaret,
+  advancePeriod, seedDev, dailyReminders, createInvite, closePeriod, closeDaret
+functions initially failed during first-time Gen2 setup:
+  onContributionWritten, onMemberCreated, startDaret
+```
+
+### Part 3 Functions deploy retry - `firebase deploy --only functions --project tantin-dev --force`
+```
+functions[startDaret(europe-west1)] Successful update operation.
+functions[onContributionWritten(europe-west1)] Successful create operation.
+functions[onMemberCreated(europe-west1)] Successful create operation.
+Configured cleanup policy for repository in europe-west1.
+Deploy complete!
+```
+
+### Part 3 live Functions verification - `firebase functions:list --project tantin-dev`
+```
+advancePeriod, approveDaret, closeDaret, closePeriod, createInvite, joinDaret,
+previewDaret, seedDev, sendNudge, startDaret: v2 callable, europe-west1, nodejs20
+dailyReminders: v2 scheduled, europe-west1, nodejs20
+onContributionWritten: v2 google.cloud.firestore.document.v1.written, europe-west1, nodejs20
+onMemberCreated: v2 google.cloud.firestore.document.v1.created, europe-west1, nodejs20
+```
+
 ## Blockers / questions for the user
-- Parts 1-2 security checkpoint: local verification and CI proof are complete. Cloud deployment remains
-  intentionally blocked until the architect audits the security layer.
+- Part 3 commit/push and CI proof are still pending in this run. Live seed invocation and device
+  screen verification are intentionally pending until the Part 4 read screens exist. Stop before Part 4
+  screens for architect review once Part 3 is committed and CI-green.
 
 ## Commits this sprint
 - `cc40081` feat(domain): add S3 daret models and logic

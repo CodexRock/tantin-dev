@@ -56,6 +56,10 @@ class DaretCallableRepository {
     );
   }
 
+  Future<void> seedDev() {
+    return _callVoid('seedDev', {});
+  }
+
   Future<void> _callVoid(String name, Map<String, dynamic> parameters) async {
     await _functions.httpsCallable(name).call<void>(parameters);
   }
