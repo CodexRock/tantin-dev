@@ -15,4 +15,10 @@ void main() {
       expect(TantinFormat.fmtDH(0), '0 DH');
     });
   });
+
+  group('TantinFormat.fmtNum', () {
+    test('formats thousands without a currency suffix', () {
+      expect(TantinFormat.fmtNum(38400), '38 400');
+    });
+  });
 }
