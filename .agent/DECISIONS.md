@@ -93,3 +93,10 @@
   `firebase-tools 15.19.0` no longer supports Java versions below 21. The hosted runner also warned
   that the older checkout/setup-node action majors use deprecated Node 20 internals. The current
   official action majors use Node 24 and are supported by the hosted runner version.
+
+## D018: Pin Flutter CI to 3.41.2
+- **Decision:** Replace floating CI `flutter-version: 3.x` with `3.41.2`, the Flutter tag matching the
+  `.metadata` framework revision `90673a4eef275d1a6692c26ac80d6d746d41a73a`.
+- **Rationale:** The floating CI version pulled Flutter 3.44/Dart 3.12, whose formatter changed output
+  for enhanced enum semicolons compared with the local Dart 3.11 formatter. The project gate must use
+  one toolchain line so local-green equals CI-green.

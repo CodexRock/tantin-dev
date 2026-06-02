@@ -63,6 +63,10 @@ are gated by tested security rules, and privileged Functions exist before read s
   https://github.com/CodexRock/tantin-dev/actions/runs/26847978786 failed in the new backend job
   before tests because `firebase-tools 15.19.0` requires Java 21+. Added Temurin JDK 21 setup and
   updated official Actions majors to Node-24-based `checkout@v6` / `setup-node@v6` / `setup-java@v5`.
+- 2026-06-02 - Replacement Actions run
+  https://github.com/CodexRock/tantin-dev/actions/runs/26848412229 proved the backend job green but
+  failed the Flutter job at format check because floating Flutter `3.x` pulled Flutter 3.44/Dart 3.12.
+  Pinned CI to Flutter `3.41.2`, matching `.metadata`, and restored local formatter output.
 
 ## Verification evidence
 

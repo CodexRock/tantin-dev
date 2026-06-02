@@ -73,6 +73,8 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
   project ID `tantin-rules-test`; live deploys continue to use `firebase.json` + target `main`.
 - CI explicitly installs Temurin JDK 21 before emulator startup; do not rely on the hosted runner's
   default Java version (D017).
+- CI pins Flutter to `3.41.2`, matching the project `.metadata` revision; do not use floating
+  `3.x`, because Dart formatter output changed in Flutter 3.44/Dart 3.12 (D018).
 - Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
 - **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
 - Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
