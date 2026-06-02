@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "tantin-dev"
-  }
+  },
+  "targets": {
+    "tantin-dev": {
+      "storage": {
+        "main": [
+          "tantin-dev.firebasestorage.app"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

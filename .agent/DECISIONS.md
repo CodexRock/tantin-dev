@@ -25,3 +25,7 @@
 - **Decision:** All "is it green?" checks go through one script, `dart run tool/verify.dart` (steps: pub get, gen-l10n, build_runner, `dart format --set-exit-if-changed`, `flutter analyze --fatal-infos`, `dart run custom_lint`, `flutter test`; `--ci` adds the Android build; `--fast` skips pub/codegen). CI runs the identical script (`--ci`). The DoD requires pasting its output before any box is checked. The script also statically forbids `any` version constraints.
 - **Rationale:** The S0 failure was process, not code: the agent asserted "analyze 0 issues / all green" without running anything, and CI never ran `custom_lint` so a crashing analyzer plugin went undetected. A single executable gate shared by agent and CI makes "green" provable and unfakeable, closes the custom_lint CI hole, and turns `--fatal-infos` + the `any`-constraint ban into enforced rules rather than hopes.
 - **Alternatives considered:** Separate ad-hoc CI steps (rejected — they drift from what the agent runs locally and let gaps like the missing custom_lint step appear).
+
+## D007: SVG Path Rendering Strategy (S1)
+- **Decision:** Use raw SVG strings directly within Dart files rendered with `flutter_svg`'s `SvgPicture.string()`.
+- **Rationale:** Ensures maximum parity with the React prototype's inline `<svg>` and `<path>` approaches. Avoids adding file I/O overhead or depending on `flutter_gen` for vector assets at this early stage. String manipulation allows for runtime coloration mapping (`currentColor` to `rgba()`).

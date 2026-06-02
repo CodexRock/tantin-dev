@@ -42,5 +42,5 @@ The project is currently in the initial setup phase. A Flutter app (`tantin_flut
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Done:** S0 architecture setup (verified: `flutter analyze` 0 issues, `dart run custom_lint` 0 issues, 4/4 tests pass, baseline Firestore rules deployed).
-- **Next:** S1 Component library & Design system. S1 must: add UI/test dependencies, build the component library to pixel-parity with the prototype (golden tests), and wire real screens into the router shell.
+- **Done:** S0 architecture setup, S1 Component library & Design system. Design tokens, shared components, SVG-based icons/zellige art, motion helpers, and gallery are implemented and verified with golden tests.
+- **Next:** S2 (or further feature sprints) to start implementing functional screens using the design system.

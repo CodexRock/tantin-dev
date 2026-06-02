@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:tantin_flutter/design_system/gallery/gallery_screen.dart';
 
 part 'router.g.dart';
 
@@ -15,6 +16,7 @@ class AppRoutes {
   static const calendar = '/calendar';
   static const activity = '/activity';
   static const profile = '/profile';
+  static const gallery = '/gallery';
 }
 
 @riverpod
@@ -23,6 +25,10 @@ GoRouter router(Ref ref) {
     navigatorKey: rootNavigatorKey,
     initialLocation: AppRoutes.home,
     routes: [
+      GoRoute(
+        path: AppRoutes.gallery,
+        builder: (context, state) => const GalleryScreen(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return Scaffold(
