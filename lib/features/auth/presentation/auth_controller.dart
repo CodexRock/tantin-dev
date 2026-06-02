@@ -90,18 +90,40 @@ class AuthController extends _$AuthController {
       String? photoUrl;
       if (photo != null) {
         final storageRef = FirebaseStorage.instance.ref().child(
-          r'avatars/${user.uid}.jpg',
+          'users/${user.uid}/avatar.jpg',
         );
         await storageRef.putFile(photo);
         photoUrl = await storageRef.getDownloadURL();
       }
 
+      final trimmedFirstName = firstName.trim();
+      final trimmedLastName = lastName.trim();
+      final initials =
+          '${trimmedFirstName[0]}'
+                  '${trimmedLastName.isEmpty ? '' : trimmedLastName[0]}'
+              .toUpperCase();
+
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-        'firstName': firstName,
-        'lastName': lastName,
+        'prenom': trimmedFirstName,
+        'nom': trimmedLastName,
+        'name': '$trimmedFirstName $trimmedLastName'.trim(),
+        'initials': initials,
         'photoUrl': photoUrl,
         'phone': user.phoneNumber ?? ref.read(currentPhoneProvider),
+        'avatarPalette': ['#5247E6', '#E7E5FB'],
+        'fcmTokens': <String>[],
+        'settings': {
+          'defaultEcheanceDay': 5,
+          'graceDays': 2,
+          'lang': 'fr',
+          'notifPrefs': {
+            'contributions': true,
+            'reminders': true,
+            'turns': true,
+          },
+        },
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       state = const AsyncData(null);

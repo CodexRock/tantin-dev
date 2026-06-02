@@ -38,8 +38,8 @@ void main() {
     test('fromFirestore parses valid data', () {
       final timestamp = Timestamp.now();
       final doc = FakeDocumentSnapshot('user123', {
-        'firstName': 'John',
-        'lastName': 'Doe',
+        'prenom': 'John',
+        'nom': 'Doe',
         'photoUrl': 'https://example.com/photo.jpg',
         'phone': '+212600000000',
         'createdAt': timestamp,

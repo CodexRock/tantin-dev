@@ -20,8 +20,9 @@ class UserProfile {
 
     return UserProfile(
       uid: doc.id,
-      firstName: data['firstName'] as String? ?? '',
-      lastName: data['lastName'] as String?,
+      firstName:
+          data['prenom'] as String? ?? data['firstName'] as String? ?? '',
+      lastName: data['nom'] as String? ?? data['lastName'] as String?,
       photoUrl: data['photoUrl'] as String?,
       phone: data['phone'] as String? ?? '',
       createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
