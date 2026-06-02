@@ -1,11 +1,145 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+    function signedIn() {
+      return request.auth != null;
     }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function daret(daretId) {
+      return get(/databases/$(database)/documents/darets/$(daretId));
+    }
+
+    function isDaretMember(daretId) {
+      return signedIn() && request.auth.uid in daret(daretId).data.memberUids;
+    }
+
+    function isDaretAdmin(daretId) {
+      return signedIn() && request.auth.uid == daret(daretId).data.adminUid;
+    }
+
+    function period(daretId, periodId) {
+      return get(
+        /databases/$(database)/documents/darets/$(daretId)/periods/$(periodId)
+      );
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid)
+        && !request.resource.data.keys().hasAny(['stats']);
+      allow update: if isSelf(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'prenom',
+          'nom',
+          'name',
+          'initials',
+          'phone',
+          'photoUrl',
+          'avatarPalette',
+          'fcmTokens',
+          'settings',
+          'updatedAt'
+        ]);
+    }
+
+    match /darets/{daretId} {
+      allow read: if isDaretMember(daretId);
+      allow create: if signedIn()
+        && request.resource.data.adminUid == request.auth.uid
+        && request.resource.data.memberUids == [request.auth.uid]
+        && request.resource.data.statut == 'brouillon'
+        && request.resource.data.currentPeriode == 0;
+      allow update: if isDaretAdmin(daretId)
+        && resource.data.statut == 'brouillon'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nom',
+          'cover',
+          'accent',
+          'montant',
+          'frequence',
+          'periodesCount',
+          'cagnotteParPeriode',
+          'prochaineDate',
+          'settings',
+          'updatedAt'
+        ]);
+
+      match /members/{memberUid} {
+        allow read: if isDaretMember(daretId);
+        allow update: if isDaretMember(daretId)
+          && request.auth.uid == memberUid
+          && resource.data.uid == memberUid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['approvalStatus'])
+          && resource.data.approvalStatus == 'pending'
+          && request.resource.data.approvalStatus == 'approved';
+      }
+
+      match /periods/{periodId} {
+        allow read: if isDaretMember(daretId);
+
+        match /contributions/{contributionUid} {
+          allow read: if isDaretMember(daretId);
+          allow update: if isDaretMember(daretId)
+            && (
+              payerDeclaresPaid(contributionUid)
+              || confirmationIsAllowed(daretId, periodId)
+            );
+
+          function payerDeclaresPaid(uid) {
+            return request.auth.uid == uid
+              && resource.data.payerUid == uid
+              && resource.data.state in ['apayer', 'retard']
+              && request.resource.data.state == 'attente'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['state', 'paidDeclaredAt'])
+              && request.resource.data.paidDeclaredAt == request.time;
+          }
+
+          function confirmationIsAllowed(id, index) {
+            return (
+                isDaretAdmin(id)
+                || request.auth.uid in period(id, index).data.recipientUids
+              )
+              && (
+                resource.data.state == 'attente'
+                || (
+                  isDaretAdmin(id)
+                  && resource.data.state in ['apayer', 'retard']
+                )
+              )
+              && request.resource.data.state == 'confirme'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['state', 'confirmedAt', 'confirmedByUid'])
+              && request.resource.data.confirmedAt == request.time
+              && request.resource.data.confirmedByUid == request.auth.uid;
+          }
+        }
+      }
+
+      match /activity/{eventId} {
+        allow read: if isDaretMember(daretId);
+      }
+    }
+
+    match /invites/{code} {
+      allow read: if signedIn();
+    }
+
+    match /notifications/{uid}/items/{notificationId} {
+      allow read: if isSelf(uid);
+      allow update: if isSelf(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['unread'])
+        && request.resource.data.unread is bool;
+    }
+
     match /{document=**} {
-      allow read, write: if false; // Default deny
+      allow read, write: if false;
     }
   }
 }

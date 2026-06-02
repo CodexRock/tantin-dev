@@ -1,0 +1,22 @@
+{
+  "name": "tantin-backend-tests",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:rules",
+    "test:rules": "firebase emulators:exec --config firebase.test.json --only firestore,storage \"jest --runInBand rules-tests\" --project tantin-rules-test"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.0",
+    "firebase": "^12.2.1",
+    "firebase-tools": "^15.19.0",
+    "jest": "^30.1.3"
+  },
+  "overrides": {
+    "gaxios": {
+      "uuid": "^11.1.1"
+    },
+    "universal-analytics": {
+      "uuid": "^11.1.1"
+    }
+  }
+}

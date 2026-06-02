@@ -25,3 +25,19 @@ jobs:
     # local and CI stay identical.
     - name: Verify (format + analyze + custom_lint + tests + build)
       run: dart run tool/verify.dart --ci
+
+  backend:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: npm
+
+    - name: Install backend test dependencies
+      run: npm ci
+
+    - name: Test Firestore and Storage rules in emulators
+      run: npm test
