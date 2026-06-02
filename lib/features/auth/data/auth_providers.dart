@@ -20,9 +20,9 @@ Stream<User?> authStateChanges(Ref ref) {
 }
 
 @riverpod
-Stream<DocumentSnapshot<Map<String, dynamic>>> userProfile(Ref ref) {
+Stream<DocumentSnapshot<Map<String, dynamic>>?> userProfile(Ref ref) {
   final user = ref.watch(authStateChangesProvider).value;
-  if (user == null) return const Stream.empty();
+  if (user == null) return Stream.value(null);
   return ref
       .watch(firebaseFirestoreProvider)
       .collection('users')

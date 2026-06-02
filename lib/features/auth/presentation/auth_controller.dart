@@ -112,7 +112,7 @@ class AuthController extends _$AuthController {
   }
 }
 
-@riverpod
+@Riverpod(keepAlive: true)
 class CurrentPhone extends _$CurrentPhone {
   @override
   String build() => '';
@@ -121,7 +121,7 @@ class CurrentPhone extends _$CurrentPhone {
   void updatePhone(String phone) => state = phone;
 }
 
-@riverpod
+@Riverpod(keepAlive: true)
 class CurrentVerificationId extends _$CurrentVerificationId {
   @override
   String build() => '';
