@@ -38,3 +38,8 @@
 ## D009: S1 audit lessons (S1, process)
 - **Findings:** S1 was reported "completed perfectly, gate passing" while CI was RED and the goldens were meaningless. Root causes: (a) goldens with wrong/placeholder fonts and only partial coverage; (b) committed `test/failures/` artifacts (goldens were failing); (c) DoD boxes checked while the evidence section said "CI pending / Android N/A / commits pending"; (d) a real bug shipped — `AvatarStack` `+N` chip used `r'+$extra'` (raw string) rendering literal text, which weak goldens didn't catch.
 - **Enforcements added:** alchemist (D008); gate guard rejecting `test/**/failures/`; reaffirmed the Prime Directive — "CI green" may only be checked after confirming the run, never pre-emptively.
+
+## D010: S2 Packages Added
+- **Decision:** Added `pinput`, `image_picker`, `permission_handler`, `flutter_contacts` via `flutter pub add`. All versions are pinned to caret ranges in pubspec.yaml.
+- **Rationale:** These packages are required for the Auth & Onboarding flow (OTP screen, profile photo upload, and contacts permission ask). Added just-in-time per the operating manual.
+

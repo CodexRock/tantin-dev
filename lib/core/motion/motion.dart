@@ -14,6 +14,7 @@ class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _opacity;
   late final Animation<Offset> _offset;
+  Timer? _delayTimer;
 
   @override
   void initState() {
@@ -35,16 +36,15 @@ class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
     if (widget.delay == Duration.zero) {
       unawaited(_controller.forward());
     } else {
-      unawaited(
-        Future.delayed(widget.delay, () {
-          if (mounted) unawaited(_controller.forward());
-        }),
-      );
+      _delayTimer = Timer(widget.delay, () {
+        if (mounted) unawaited(_controller.forward());
+      });
     }
   }
 
   @override
   void dispose() {
+    _delayTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }

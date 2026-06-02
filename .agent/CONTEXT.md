@@ -3,7 +3,12 @@
 **Current Sprint:** S1 complete (audited + remediated) → S2 next
 
 ## Project Status
-Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project (S0), with the full design system + component library built and golden-tested (S1). The app boots to a placeholder 5-tab shell; a dev-only gallery route renders every component.
+Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
+- **Firebase Auth (S2):** Implemented for phone sign-in. Use test numbers to avoid SMS costs during development:
+  - `+212 6 00 00 00 00` (code `123456`)
+  - `+212 6 11 11 11 11` (code `111111`)
+
+The app boots to a placeholder 5-tab shell; a dev-only gallery route renders every component. S1 design system & component library are built and golden-tested.
 
 ## Architecture & Folder Map
 - `lib/core/`: Application-wide concerns (routing, formatting, tokens, theme, providers, motion).

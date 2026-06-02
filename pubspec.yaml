@@ -55,6 +55,10 @@ dependencies:
   share_plus: ^13.1.0
   flutter_svg: ^2.3.0
   confetti: ^0.8.0
+  pinput: ^6.0.2
+  image_picker: ^1.2.2
+  permission_handler: ^12.0.3
+  flutter_contacts: ^2.1.0
 
 dev_dependencies:
   flutter_test:
