@@ -59,6 +59,10 @@ are gated by tested security rules, and privileged Functions exist before read s
   loop to stay compatible with the pinned analyzer. Fresh user-ran Flutter gate pending.
 - 2026-06-02 - User-ran `flutter analyze --fatal-infos` after typed-loop fix: no issues found. Full
   canonical gate rerun still required before checking Part 1/2 complete.
+- 2026-06-02 - Pushed Parts 1-2 checkpoint at `e83904d`; GitHub Actions run
+  https://github.com/CodexRock/tantin-dev/actions/runs/26847978786 failed in the new backend job
+  before tests because `firebase-tools 15.19.0` requires Java 21+. Added Temurin JDK 21 setup and
+  updated official Actions majors to Node-24-based `checkout@v6` / `setup-node@v6` / `setup-java@v5`.
 
 ## Verification evidence
 

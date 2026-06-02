@@ -85,3 +85,11 @@
   `firstName`/`lastName` keys during migration.
 - **Rationale:** Tight Storage rules require a UID-scoped avatar path. The previous raw string
   `r'avatars/${user.uid}.jpg'` uploaded to a literal interpolation path and did not match the S3 model.
+
+## D017: Pin Java 21 and current official Actions majors in backend CI
+- **Decision:** The backend CI job installs Temurin JDK 21 using `actions/setup-java@v5`. Update
+  official workflow actions to `actions/checkout@v6` and `actions/setup-node@v6`.
+- **Rationale:** The first pushed backend job failed before emulator startup because
+  `firebase-tools 15.19.0` no longer supports Java versions below 21. The hosted runner also warned
+  that the older checkout/setup-node action majors use deprecated Node 20 internals. The current
+  official action majors use Node 24 and are supported by the hosted runner version.

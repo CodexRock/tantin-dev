@@ -39,6 +39,7 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `flutter gen-l10n`: Generate localizations.
 - `npm install`: Resolve the pinned backend rules-test toolchain and refresh `package-lock.json`.
 - `npm test`: Run Firestore + Storage allow/deny rules tests in emulators using `firebase.test.json`.
+- Backend emulator tests require Java 21+ because `firebase-tools 15.19.0` rejects older runtimes.
 - The backend test harness applies scoped `uuid ^11.1.1` npm overrides under `gaxios` and
   `universal-analytics`; `npm audit --json` must remain clean (D016).
 
@@ -70,6 +71,8 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
   deploy only after the Part 2 security audit and a fresh green emulator run.
 - `firebase.test.json` intentionally avoids the live Storage target. Emulator tests use isolated
   project ID `tantin-rules-test`; live deploys continue to use `firebase.json` + target `main`.
+- CI explicitly installs Temurin JDK 21 before emulator startup; do not rely on the hosted runner's
+  default Java version (D017).
 - Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
 - **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
 - Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
