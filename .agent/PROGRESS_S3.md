@@ -67,6 +67,11 @@ are gated by tested security rules, and privileged Functions exist before read s
   https://github.com/CodexRock/tantin-dev/actions/runs/26848412229 proved the backend job green but
   failed the Flutter job at format check because floating Flutter `3.x` pulled Flutter 3.44/Dart 3.12.
   Pinned CI to Flutter `3.41.2`, matching `.metadata`, and restored local formatter output.
+- 2026-06-02 - User-ran the full canonical Flutter gate after the typed-loop mapper fix: dependency
+  resolution, l10n, codegen, format, static analysis, custom lint, and 47 tests all passed.
+- 2026-06-02 - GitHub Actions run
+  https://github.com/CodexRock/tantin-dev/actions/runs/26849086391 for `8bdc6c5` completed green:
+  `backend` passed the emulator rules suite and `verify` passed the pinned Flutter gate.
 
 ## Verification evidence
 
@@ -92,8 +97,8 @@ CI: GREEN
 ```
 
 ### Part 1 / Part 2 verification
-The user requested that the agent not run Dart or Flutter commands because they are slow; the agent
-will provide exact commands for the user to run and record the pasted terminal output.
+The user requested that the agent not run Dart or Flutter commands because they are slow. Flutter
+verification below is from user-pasted terminal output; backend npm verification was run by the agent.
 
 ### Backend audit - `npm audit --json`
 ```
@@ -175,15 +180,27 @@ No issues found! (ran in 84.8s)
 GATE: PASS ✅  — safe to check DoD boxes.
 ```
 
+### Part 1 / Part 2 CI - GitHub Actions
+```
+commit: 8bdc6c5
+run: https://github.com/CodexRock/tantin-dev/actions/runs/26849086391
+backend: success
+verify: success
+CI: GREEN
+```
+
 ## Blockers / questions for the user
-- Parts 1-2 security checkpoint: local verification is complete. Cloud deployment and CI proof remain
-  pending until the architect audits the security layer and the checkpoint commits are pushed.
+- Parts 1-2 security checkpoint: local verification and CI proof are complete. Cloud deployment remains
+  intentionally blocked until the architect audits the security layer.
 
 ## Commits this sprint
 - `cc40081` feat(domain): add S3 daret models and logic
 - `db6df25` feat(data): add realtime Firestore repositories
 - `d007245` fix(auth): scope avatars and canonicalize profiles
 - `6dd60c1` feat(security): enforce Firebase least privilege rules
+- `e83904d` docs(s3): record security checkpoint
+- `e4f7826` fix(ci): provision Java 21 for Firebase emulators
+- `8bdc6c5` fix(ci): pin Flutter 3.41.2 formatter
 
 ## Definition of Done gate
 - [ ] Every task above is implemented and verified

@@ -1,6 +1,6 @@
 # Tant'in Context
 
-**Current Sprint:** S3 Parts 1-2 checkpoint - locally verified, architect audit pending
+**Current Sprint:** S3 Parts 1-2 checkpoint - local + CI verified, architect audit pending
 
 ## Project Status
 Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
@@ -84,8 +84,10 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 ## What's Done / What's Next
 - **Current checkpoint:** S3 Parts 1-2 only. Domain models/logic, repositories, rules, indexes, Storage
   tightening, emulator tests, and backend CI lane are implemented locally. Local proof: `npm audit`
-  has zero vulnerabilities, `npm test` passes 19 emulator assertions, and `dart run tool/verify.dart`
-  passes with 47 tests. Do not deploy or start Functions/screens until the architect approves this
+  has zero vulnerabilities, `npm test` passes 19 emulator assertions, and user-ran
+  `dart run tool/verify.dart` passes with 47 tests. CI proof:
+  https://github.com/CodexRock/tantin-dev/actions/runs/26849086391 is green for `8bdc6c5`
+  (`backend` + `verify`). Do not deploy or start Functions/screens until the architect approves this
   security checkpoint.
 - **Done:** S0 setup; S1 design system; **S2 auth & onboarding** — splash/intro/phone/OTP/profile/contacts/home+coachmark, `OtpChannel`+`SmsOtpChannel`, auth-driven go_router redirects, `users/{uid}` least-privilege Firestore rule (deployed). Verified: gate green (33 tests), CI green (goldens excluded per D011).
 - **Next:** S3 — backend shell + read paths (daret data model, Firestore reads, real screens behind the shell). Reuse the design system; add S3 deps just-in-time; every new collection gets a least-privilege rule + (ideally) an emulator rules test.
