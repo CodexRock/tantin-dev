@@ -34,6 +34,9 @@ Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Fire
 - **Never check a Definition-of-Done box without pasting this gate's output** (see the Operating
   Manual's Prime Directive). CI runs the exact same script (`dart run tool/verify.dart --ci`), so
   local-green == CI-green.
+- **After pushing, prove CI is actually green: `dart run tool/check_ci.dart`** — it finds the Actions
+  run for HEAD, waits for it to finish, and exits non-zero unless it's `success`. A sprint is not done
+  until this prints `CI: GREEN`. (Set `GITHUB_TOKEN` to avoid the 60/hour unauthenticated rate limit.)
 - Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
 ## Golden-test workflow (D008)
