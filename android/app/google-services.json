@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "619308900387",
+    "project_id": "tantin-dev",
+    "storage_bucket": "tantin-dev.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:619308900387:android:e6b910ba8ee352277ad196",
+        "android_client_info": {
+          "package_name": "com.tantin.app.tantin_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAgenbaLJRGwsomyR08mBYm-Kue_j47VGI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
