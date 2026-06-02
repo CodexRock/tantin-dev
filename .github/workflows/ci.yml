@@ -7,7 +7,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
 
     steps:
@@ -16,27 +16,12 @@ jobs:
       with:
         flutter-version: '3.x'
         channel: 'stable'
-    
-    - name: Install dependencies
-      run: flutter pub get
-      
-    - name: Generate localization and codegen files
-      run: |
-        flutter gen-l10n
-        dart run build_runner build --delete-conflicting-outputs
-        
-    - name: Format code
-      run: dart format --set-exit-if-changed .
 
-    - name: Analyze code
-      run: flutter analyze
-
-    - name: Run tests
-      run: flutter test
-
-    - name: Build Android APK
-      run: flutter build apk --debug
-      
-    # iOS build stubbed for future Mac setup
-    # - name: Build iOS
-    #   run: flutter build ios --no-codesign
+    # Single source of truth: CI runs the EXACT same gate the agent runs locally
+    # (tool/verify.dart). This guarantees "green on my machine" == "green in CI".
+    # The script does: pub get, gen-l10n, build_runner, format check,
+    # analyze --fatal-infos, custom_lint, tests, and (in --ci) the Android build.
+    # Do NOT add ad-hoc steps here that bypass the gate — change verify.dart so
+    # local and CI stay identical.
+    - name: Verify (format + analyze + custom_lint + tests + build)
+      run: dart run tool/verify.dart --ci

@@ -20,3 +20,8 @@
 ## D005: freezed 3.x requires `abstract`/`sealed` data classes (S0, remediation)
 - **Decision:** Freezed model classes are declared `@freezed abstract class X with _$X` (not bare `class`).
 - **Rationale:** freezed 3.x emits the implementation in a generated private class and leaves the public class abstract; a bare `class` triggers `non_abstract_class_inherits_abstract_member` (compile error). Also migrated deprecated per-provider `Ref` typedefs (`FooRef`) to the shared `Ref` type from `flutter_riverpod`.
+
+## D006: Single canonical verification gate (`tool/verify.dart`) (S0, process hardening)
+- **Decision:** All "is it green?" checks go through one script, `dart run tool/verify.dart` (steps: pub get, gen-l10n, build_runner, `dart format --set-exit-if-changed`, `flutter analyze --fatal-infos`, `dart run custom_lint`, `flutter test`; `--ci` adds the Android build; `--fast` skips pub/codegen). CI runs the identical script (`--ci`). The DoD requires pasting its output before any box is checked. The script also statically forbids `any` version constraints.
+- **Rationale:** The S0 failure was process, not code: the agent asserted "analyze 0 issues / all green" without running anything, and CI never ran `custom_lint` so a crashing analyzer plugin went undetected. A single executable gate shared by agent and CI makes "green" provable and unfakeable, closes the custom_lint CI hole, and turns `--fatal-infos` + the `any`-constraint ban into enforced rules rather than hopes.
+- **Alternatives considered:** Separate ad-hoc CI steps (rejected — they drift from what the agent runs locally and let gaps like the missing custom_lint step appear).

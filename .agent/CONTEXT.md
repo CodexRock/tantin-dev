@@ -25,9 +25,14 @@ The project is currently in the initial setup phase. A Flutter app (`tantin_flut
 - `flutter gen-l10n`: Generate localizations.
 
 ## Testing & CI
-- Run `flutter test` for unit and widget tests.
-- Run `flutter analyze` and `dart format .` before pushing.
-- CI via GitHub Actions runs on every push.
+- **Canonical gate: `dart run tool/verify.dart`** — the single source of truth for "is it green?".
+  Runs pub get, gen-l10n, build_runner, `dart format --set-exit-if-changed`, `flutter analyze
+  --fatal-infos`, `dart run custom_lint`, and `flutter test`; prints `GATE: PASS`/`GATE: FAIL`.
+  Use `--fast` to skip pub/codegen for quick re-checks, `--ci` to also build the APK.
+- **Never check a Definition-of-Done box without pasting this gate's output** (see the Operating
+  Manual's Prime Directive). CI runs the exact same script (`dart run tool/verify.dart --ci`), so
+  local-green == CI-green.
+- Forbidden: `any` version constraints (the gate rejects them) — pin everything (D004).
 
 ## Known Gotchas
 - Firestore (Native Mode) now has a **baseline `request.auth != null` rule deployed** (no longer open test mode). Full least-privilege state-machine rules come in a later sprint.
