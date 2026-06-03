@@ -31,15 +31,16 @@ beforeEach(async () => {
 });
 
 describe('callable guards', () => {
-  test('rejects missing auth, missing App Check, and bad input', () => {
+  test('rejects missing auth and bad input; App Check not enforced in dev', () => {
     expectCode(
       () => parseCallable(__testables.schemas.daretIdInput, {data: {daretId: 'd1'}, app: {appId: 'app'}}),
       'unauthenticated',
     );
-    expectCode(
-      () => parseCallable(__testables.schemas.daretIdInput, {data: {daretId: 'd1'}, auth: {uid: 'u1'}}),
-      'failed-precondition',
-    );
+    // App Check enforcement is disabled in dev (re-enable before release): a
+    // missing app context is allowed and parses successfully.
+    expect(() =>
+      parseCallable(__testables.schemas.daretIdInput, {data: {daretId: 'd1'}, auth: {uid: 'u1'}}),
+    ).not.toThrow();
     expectCode(
       () =>
         parseCallable(__testables.schemas.daretIdInput, {

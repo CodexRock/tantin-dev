@@ -23,13 +23,17 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // Debug builds use the App Check debug provider (register the printed debug
-  // token in Firebase Console → App Check). Release builds use Play Integrity.
-  // The default Play Integrity provider fails on dev devices with
-  // "Too many attempts", which blocks the App Check-enforced callables.
+  // Debug builds use the App Check debug provider with a FIXED debug token so
+  // we don't have to scrape it from logcat. This token is dev-only and grants
+  // nothing on its own — it must be registered in Firebase Console → App Check
+  // → Manage debug tokens, and Firestore rules still apply. Release builds use
+  // Play Integrity (the default provider fails on dev devices with
+  // "Too many attempts", blocking the App Check-enforced callables).
   await FirebaseAppCheck.instance.activate(
     providerAndroid: kDebugMode
-        ? const AndroidDebugProvider()
+        ? const AndroidDebugProvider(
+            debugToken: 'a8303487-876e-41be-8a07-8e971edc9229',
+          )
         : const AndroidPlayIntegrityProvider(),
   );
 

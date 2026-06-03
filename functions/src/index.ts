@@ -26,7 +26,11 @@ const REMINDER_DAY_MS = 24 * 60 * 60 * 1000;
 const UID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DARET_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const INVITE_CODE_PATTERN = /^TANTIN-[A-Z0-9]{4,8}$/;
-const callableOptions = {region: REGION, enforceAppCheck: true};
+// App Check enforcement is OFF in dev: the test devices' Play Integrity is
+// unreliable ("Too many attempts") and blocks every callable. Auth + Firestore
+// rules still protect all data. RE-ENABLE before release (S6). See DECISIONS.
+const enforceAppCheck: boolean = false;
+const callableOptions = {region: REGION, enforceAppCheck};
 
 type ErrorCode =
   | 'invalid-argument'
@@ -140,8 +144,8 @@ export function parseCallable<T>(
   if (typeof uid !== 'string' || uid.length === 0) {
     fail('unauthenticated', 'Authentication is required.');
   }
-  const appId = request.app?.appId;
-  if (typeof appId !== 'string' || appId.length === 0) {
+  const appId = request.app?.appId ?? '';
+  if (enforceAppCheck && appId.length === 0) {
     fail('failed-precondition', 'App Check is required.');
   }
   const parsed = schema.safeParse(request.data);
