@@ -26,6 +26,7 @@ const REMINDER_DAY_MS = 24 * 60 * 60 * 1000;
 const UID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DARET_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const INVITE_CODE_PATTERN = /^TANTIN-[A-Z0-9]{4,8}$/;
+const PENDING_MEMBER_PREFIX = 'pending_';
 // App Check enforcement is OFF in dev: the test devices' Play Integrity is
 // unreliable ("Too many attempts") and blocks every callable. Auth + Firestore
 // rules still protect all data. RE-ENABLE before release (S6). See DECISIONS.
@@ -88,6 +89,12 @@ interface PeriodPlan {
   scheduledDate: Timestamp;
   potAmount: number;
   status: PeriodStatus;
+}
+
+interface DraftExpansion {
+  memberUids: string[];
+  memberDocs: FirestoreData[];
+  periodPlans: PeriodPlan[];
 }
 
 const daretIdSchema = z
@@ -248,24 +255,32 @@ async function startDaretHandler(
       fail('failed-precondition', 'Only draft or pending darets can be started.');
     }
 
-    const memberUids = requireStringArray(daret, 'memberUids');
+    let memberUids = requireStringArray(daret, 'memberUids');
     if (memberUids.length === 0) {
       fail('failed-precondition', 'A daret must have at least one member.');
     }
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
-    if (memberUids.length > periodesCount) {
-      fail('failed-precondition', 'Every member needs a period assignment.');
-    }
 
     const membersSnapshot = await transaction.get(daretRef.collection('members'));
-    const memberDocs = membersSnapshot.docs.map((doc) => dataWithId(doc));
-    ensureMemberDocs(memberUids, memberDocs);
-
     const existingPeriods = await transaction.get(daretRef.collection('periods'));
-    const periodPlans =
-      existingPeriods.empty
-        ? buildDefaultPeriods(daret, memberUids, now)
-        : existingPeriods.docs.map(readPeriodPlan);
+    let memberDocs = membersSnapshot.docs.map((doc) => dataWithId(doc));
+    let periodPlans: PeriodPlan[];
+    let draftExpansion: DraftExpansion | undefined;
+    if (hasDraftPlan(daret)) {
+      if (!membersSnapshot.empty || !existingPeriods.empty) {
+        fail('failed-precondition', 'Draft payload cannot be mixed with existing server-owned docs.');
+      }
+      draftExpansion = await expandDraftPlan(transaction, db, daret, context.uid, now);
+      memberUids = draftExpansion.memberUids;
+      memberDocs = draftExpansion.memberDocs;
+      periodPlans = draftExpansion.periodPlans;
+    } else {
+      ensureMemberDocs(memberUids, memberDocs);
+      periodPlans =
+        existingPeriods.empty
+          ? buildDefaultPeriods(daret, memberUids, now)
+          : existingPeriods.docs.map(readPeriodPlan);
+    }
     validatePeriodPlans(periodPlans, memberUids, periodesCount);
 
     const allApproved = memberDocs.every(
@@ -277,20 +292,29 @@ async function startDaretHandler(
       fail('failed-precondition', 'Period 1 is missing.');
     }
 
+    if (draftExpansion !== undefined) {
+      for (const member of draftExpansion.memberDocs) {
+        const uid = requireString(member, 'uid');
+        transaction.set(daretRef.collection('members').doc(uid), member, {merge: false});
+      }
+    }
     for (const plan of periodPlans) {
       transaction.set(
         daretRef.collection('periods').doc(plan.id),
-        periodDocument(plan, plan.index === 1 ? 'current' : 'upcoming', null),
+        periodDocument(plan, nextStatus === 'actif' && plan.index === 1 ? 'current' : 'upcoming', null),
         {merge: true},
       );
     }
-    setContributionsInTransaction(
-      transaction,
-      daretRef,
-      currentPlan,
-      memberUids,
-      requirePositiveInteger(daret, 'montant'),
-    );
+    const montant = requirePositiveInteger(daret, 'montant');
+    if (nextStatus === 'actif') {
+      setContributionsInTransaction(
+        transaction,
+        daretRef,
+        currentPlan,
+        memberUids,
+        montant,
+      );
+    }
     transaction.set(
       daretRef.collection('activity').doc('start'),
       activityDocument({
@@ -303,10 +327,14 @@ async function startDaretHandler(
     );
     transaction.update(daretRef, {
       statut: nextStatus,
+      memberUids,
+      cagnotteParPeriode: montant * memberUids.length,
       currentPeriode: 1,
       prochaineDate: currentPlan.scheduledDate,
       startedAt: nextStatus === 'actif' ? now : null,
       updatedAt: now,
+      draftMembers: FieldValue.delete(),
+      draftPeriods: FieldValue.delete(),
     });
     logger.info('startDaret completed', {
       daretId: context.data.daretId,
@@ -375,6 +403,7 @@ async function previewDaretHandler(
     frequence: requireString(daret, 'frequence'),
     periodesCount: requirePositiveInteger(daret, 'periodesCount'),
     membersCount: requireStringArray(daret, 'memberUids').length,
+    pendingInvitesCount: requireStringArray(daret, 'memberUids').filter(isPendingMemberUid).length,
     statut: requireStatus(daret),
   };
 }
@@ -405,18 +434,43 @@ async function joinDaretHandler(
       return {daretId, joined: false};
     }
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
-    if (memberUids.length >= periodesCount) {
+    const placeholderUid = memberUids.find(isPendingMemberUid);
+    if (memberUids.length >= periodesCount && placeholderUid === undefined) {
       fail('failed-precondition', 'This daret is full.');
     }
 
     const profileSnapshot = await transaction.get(db.collection('users').doc(context.uid));
     const profile = readRequiredProfile(context.uid, profileSnapshot);
     const memberRef = daretRef.collection('members').doc(context.uid);
+    const periodsSnapshot =
+      placeholderUid === undefined ? undefined : await transaction.get(daretRef.collection('periods'));
+    if (placeholderUid !== undefined && periodsSnapshot !== undefined) {
+      const nextMemberUids = memberUids.map((uid) => (uid === placeholderUid ? context.uid : uid));
+      for (const periodSnapshot of periodsSnapshot.docs) {
+        const plan = readPeriodPlan(periodSnapshot);
+        if (!plan.recipientUids.includes(placeholderUid) && plan.shares[placeholderUid] === undefined) {
+          continue;
+        }
+        const recipientUids = plan.recipientUids.map((uid) => (uid === placeholderUid ? context.uid : uid));
+        const shares = {...plan.shares};
+        if (shares[placeholderUid] !== undefined) {
+          shares[context.uid] = shares[placeholderUid] ?? 0;
+          delete shares[placeholderUid];
+        }
+        transaction.update(periodSnapshot.ref, {recipientUids, shares});
+      }
+      transaction.delete(daretRef.collection('members').doc(placeholderUid));
+      transaction.update(daretRef, {
+        memberUids: nextMemberUids,
+        updatedAt: now,
+      });
+    } else {
+      transaction.update(daretRef, {
+        memberUids: FieldValue.arrayUnion(context.uid),
+        updatedAt: now,
+      });
+    }
     transaction.set(memberRef, memberDocument(profile, 'member', 'pending', now), {merge: false});
-    transaction.update(daretRef, {
-      memberUids: FieldValue.arrayUnion(context.uid),
-      updatedAt: now,
-    });
     transaction.set(
       daretRef.collection('activity').doc(`member-${context.uid}`),
       activityDocument({
@@ -1020,6 +1074,105 @@ function ensureMemberDocs(memberUids: string[], memberDocs: FirestoreData[]): vo
   }
 }
 
+function hasDraftPlan(daret: FirestoreData): boolean {
+  return daret.draftMembers !== undefined || daret.draftPeriods !== undefined;
+}
+
+async function expandDraftPlan(
+  transaction: Transaction,
+  db: Firestore,
+  daret: FirestoreData,
+  adminUid: string,
+  now: Timestamp,
+): Promise<DraftExpansion> {
+  const draftMembers = requireRecordArray(daret, 'draftMembers');
+  const draftPeriods = requireRecordArray(daret, 'draftPeriods');
+  const periodesCount = requirePositiveInteger(daret, 'periodesCount');
+  if (draftMembers.length < periodesCount) {
+    fail('failed-precondition', 'Every period needs an assigned member or invite.');
+  }
+
+  const memberProfiles: PersonProfile[] = [];
+  const seen = new Set<string>();
+  for (const draftMember of draftMembers) {
+    const uid = requireString(draftMember, 'uid');
+    validateDraftMemberUid(uid);
+    if (seen.has(uid)) {
+      fail('failed-precondition', 'Draft members must be unique.');
+    }
+    seen.add(uid);
+    if (isPendingMemberUid(uid)) {
+      memberProfiles.push(readPendingDraftProfile(draftMember));
+      continue;
+    }
+    const profileSnapshot = await transaction.get(db.collection('users').doc(uid));
+    memberProfiles.push(readRequiredProfile(uid, profileSnapshot));
+  }
+  if (!seen.has(adminUid)) {
+    fail('failed-precondition', 'The admin must be included in draft members.');
+  }
+
+  const memberDocs = memberProfiles.map((profile) => {
+    const isAdmin = profile.uid === adminUid;
+    return memberDocument(profile, isAdmin ? 'admin' : 'member', isAdmin ? 'approved' : 'pending', now);
+  });
+  const memberUids = memberProfiles.map((profile) => profile.uid);
+  const periodPlans = readDraftPeriodPlans(daret, draftPeriods, now);
+  return {memberUids, memberDocs, periodPlans};
+}
+
+function readDraftPeriodPlans(
+  daret: FirestoreData,
+  draftPeriods: FirestoreData[],
+  now: Timestamp,
+): PeriodPlan[] {
+  const startDate = optionalTimestamp(daret, 'prochaineDate') ?? now;
+  const frequence = requireString(daret, 'frequence');
+  const montant = requirePositiveInteger(daret, 'montant');
+  const draftMembersCount = requireRecordArray(daret, 'draftMembers').length;
+  return draftPeriods.map((period) => {
+    const index = requirePositiveInteger(period, 'index');
+    return {
+      id: periodId(index),
+      index,
+      recipientUids: requireStringArray(period, 'recipientUids'),
+      shares: requireNumberMap(period, 'shares'),
+      scheduledDate: scheduleDate(startDate, frequence, index - 1),
+      potAmount: montant * draftMembersCount,
+      status: 'upcoming',
+    };
+  });
+}
+
+function readPendingDraftProfile(member: FirestoreData): PersonProfile {
+  const uid = requireString(member, 'uid');
+  const index = optionalNumber(member, 'inviteIndex') ?? 1;
+  const prenom = optionalString(member, 'prenom') ?? `Invitation ${index}`;
+  const nom = optionalString(member, 'nom') ?? '';
+  const name = optionalString(member, 'name') ?? (nom.length > 0 ? `${prenom} ${nom}` : prenom);
+  const initials = optionalString(member, 'initials') ?? 'IN';
+  const avatarPalette = requireStringArray(member, 'avatarPalette');
+  return {
+    uid,
+    prenom,
+    nom,
+    name,
+    initials,
+    phone: '',
+    avatarPalette,
+  };
+}
+
+function validateDraftMemberUid(uid: string): void {
+  if (!UID_PATTERN.test(uid)) {
+    fail('failed-precondition', 'Draft member uid is invalid.');
+  }
+}
+
+function isPendingMemberUid(uid: string): boolean {
+  return uid.startsWith(PENDING_MEMBER_PREFIX);
+}
+
 function buildDefaultPeriods(
   daret: FirestoreData,
   memberUids: string[],
@@ -1079,6 +1232,9 @@ function validatePeriodPlans(plans: PeriodPlan[], memberUids: string[], periodes
     for (const uid of plan.recipientUids) {
       if (!memberSet.has(uid)) {
         fail('failed-precondition', 'Period recipient must be a member.');
+      }
+      if (recipientsSeen.has(uid)) {
+        fail('failed-precondition', 'Every member can be assigned only once.');
       }
       const share = plan.shares[uid];
       if (share === undefined || !Number.isInteger(share) || share <= 0) {
@@ -1356,6 +1512,14 @@ function requireStringArray(data: FirestoreData, field: string): string[] {
     fail('failed-precondition', `${field} must be a string array.`);
   }
   return value as string[];
+}
+
+function requireRecordArray(data: FirestoreData, field: string): FirestoreData[] {
+  const value = data[field];
+  if (!Array.isArray(value)) {
+    fail('failed-precondition', `${field} must be an array.`);
+  }
+  return value.map((item, index) => recordValue(item, `${field}.${index}`));
 }
 
 function requireNumberMap(data: FirestoreData, field: string): Record<string, number> {

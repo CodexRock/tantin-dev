@@ -152,3 +152,18 @@
 - **Rationale:** The first blind-built hero was too simple vs the prototype; extracting it makes it
   prototype-faithful, reusable, and golden-testable with plain data (no provider overrides). The
   primary button's real behaviour (declare-paid / receive) lands in S5; it navigates to the daret now.
+
+## D024: S4 draft expansion stays behind `startDaret`
+- **Decision:** The create wizard holds draft state locally, then writes one rules-allowed
+  `darets/{id}` draft root containing client-owned `draftMembers` and `draftPeriods`. The deployed
+  `startDaret(daretId)` callable expands that draft into server-owned `members` and `periods`, validates
+  every period/member assignment and group shares, deletes the draft payload, and keeps `statut`,
+  `memberUids`, period docs, contribution docs, and approval state Function-owned. Pending non-app
+  contacts are represented only as generic `pending_*` invite placeholders; no contact phone numbers
+  are stored. `joinDaret` replaces one placeholder with the real caller UID and updates period
+  recipients/shares in the same transaction.
+- **Rationale:** S3 rules correctly deny client-created nested member/period docs, while the S4
+  prototype requires drag-drop assignment before start. Expanding a draft payload inside the existing
+  callable preserves the security boundary and avoids adding a broad privileged client write or
+  loosening nested-doc rules. Placeholders let the creator reserve invite slots without storing contact
+  PII and without overfilling the daret before invitees join.

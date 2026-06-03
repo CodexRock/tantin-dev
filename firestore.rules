@@ -27,6 +27,49 @@ service cloud.firestore {
       );
     }
 
+    function validDraftRootCreate() {
+      return request.resource.data.keys().hasOnly([
+          'nom',
+          'cover',
+          'accent',
+          'montant',
+          'frequence',
+          'periodesCount',
+          'cagnotteParPeriode',
+          'statut',
+          'adminUid',
+          'memberUids',
+          'currentPeriode',
+          'prochaineDate',
+          'inviteCode',
+          'settings',
+          'createdAt',
+          'updatedAt',
+          'startedAt',
+          'closedAt',
+          'draftMembers',
+          'draftPeriods'
+        ])
+        && request.resource.data.keys().hasAll([
+          'nom',
+          'cover',
+          'accent',
+          'montant',
+          'frequence',
+          'periodesCount',
+          'cagnotteParPeriode',
+          'statut',
+          'adminUid',
+          'memberUids',
+          'currentPeriode',
+          'settings'
+        ])
+        && (!request.resource.data.keys().hasAny(['draftMembers'])
+          || request.resource.data.draftMembers is list)
+        && (!request.resource.data.keys().hasAny(['draftPeriods'])
+          || request.resource.data.draftPeriods is list);
+    }
+
     match /users/{uid} {
       allow read: if isSelf(uid);
       allow create: if isSelf(uid)
@@ -52,6 +95,7 @@ service cloud.firestore {
       // array-contains uid, which this rule authorizes.
       allow read: if signedIn() && request.auth.uid in resource.data.memberUids;
       allow create: if signedIn()
+        && validDraftRootCreate()
         && request.resource.data.adminUid == request.auth.uid
         && request.resource.data.memberUids == [request.auth.uid]
         && request.resource.data.statut == 'brouillon'

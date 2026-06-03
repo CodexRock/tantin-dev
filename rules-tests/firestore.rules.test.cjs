@@ -220,10 +220,37 @@ describe('darets', () => {
       settings: { echeanceDay: 5, graceDays: 2 },
     };
     await assertSucceeds(setDoc(doc(db('payer'), 'darets/new'), validDraft));
+    await assertSucceeds(
+      setDoc(doc(db('payer'), 'darets/new-s4'), {
+        ...validDraft,
+        draftMembers: [
+          { uid: 'payer', avatarPalette: ['#5247E6', '#E7E5FB'] },
+          {
+            uid: 'pending_invite_1',
+            inviteIndex: 1,
+            avatarPalette: ['#F5A623', '#FBEFD6'],
+          },
+        ],
+        draftPeriods: [
+          { index: 1, recipientUids: ['payer'], shares: { payer: 100 } },
+          {
+            index: 2,
+            recipientUids: ['pending_invite_1'],
+            shares: { pending_invite_1: 100 },
+          },
+        ],
+      }),
+    );
     await assertFails(
       setDoc(doc(db('payer'), 'darets/forged'), {
         ...validDraft,
         memberUids: ['payer', 'outsider'],
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db('payer'), 'darets/smuggled'), {
+        ...validDraft,
+        serverOwnedSurprise: true,
       }),
     );
   });

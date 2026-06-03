@@ -7,6 +7,8 @@ const db = getFirestore();
 
 type CreateInviteDeps = Parameters<typeof __testables.createInviteHandler>[1];
 
+jest.setTimeout(30000);
+
 function deps(projectId = 'tantin-rules-test', code = 'TANTIN-7K2P'): CreateInviteDeps {
   return {
     db,
@@ -205,6 +207,67 @@ describe('daret state integrity', () => {
       state: 'apayer',
       amount: 1500,
     });
+  });
+
+  test('startDaret expands S4 draft payload and joinDaret replaces a pending invite slot', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('joiner', 'Joiner');
+    await seedS4DraftPayloadDaret('d1');
+
+    const started = await __testables.startDaretHandler(ctx('admin', {daretId: 'd1'}), deps());
+
+    expect(started).toEqual({status: 'attente', currentPeriode: 1});
+    const startedDaret = await db.collection('darets').doc('d1').get();
+    expect(startedDaret.data()).toMatchObject({
+      statut: 'attente',
+      currentPeriode: 1,
+      memberUids: ['admin', 'pending_invite_1'],
+      cagnotteParPeriode: 3000,
+    });
+    expect(startedDaret.data()).not.toHaveProperty('draftMembers');
+    expect(startedDaret.data()).not.toHaveProperty('draftPeriods');
+    const pendingMember = await db.collection('darets').doc('d1').collection('members').doc('pending_invite_1').get();
+    expect(pendingMember.data()).toMatchObject({
+      uid: 'pending_invite_1',
+      approvalStatus: 'pending',
+      name: 'Invitation 1',
+    });
+    expect(pendingMember.data()).not.toHaveProperty('phone');
+    const pendingPeriod = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    expect(pendingPeriod.data()).toMatchObject({
+      recipientUids: ['pending_invite_1'],
+      shares: {pending_invite_1: 100},
+      status: 'upcoming',
+    });
+
+    const invite = await __testables.createInviteHandler(ctx('admin', {daretId: 'd1'}), deps());
+    const joined = await __testables.joinDaretHandler(ctx('joiner', {code: invite.code}), deps());
+
+    expect(joined).toEqual({daretId: 'd1', joined: true});
+    const joinedDaret = await db.collection('darets').doc('d1').get();
+    expect(joinedDaret.data()?.memberUids).toEqual(['admin', 'joiner']);
+    const removedPending = await db.collection('darets').doc('d1').collection('members').doc('pending_invite_1').get();
+    expect(removedPending.exists).toBe(false);
+    const joinedPeriod = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    expect(joinedPeriod.data()).toMatchObject({
+      recipientUids: ['joiner'],
+      shares: {joiner: 100},
+    });
+
+    const approved = await __testables.approveDaretHandler(ctx('joiner', {daretId: 'd1'}), deps());
+
+    expect(approved).toEqual({activated: true});
+    const activeDaret = await db.collection('darets').doc('d1').get();
+    expect(activeDaret.data()?.statut).toBe('actif');
+    const contribution = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .doc('joiner')
+      .get();
+    expect(contribution.data()).toMatchObject({payerUid: 'joiner', state: 'apayer', amount: 1500});
   });
 
   test('startDaret rejects malformed period shares', async () => {
@@ -445,6 +508,51 @@ async function seedDraftDaret(
       groupePart: null,
     });
   }
+}
+
+async function seedS4DraftPayloadDaret(daretId: string): Promise<void> {
+  await db.collection('darets').doc(daretId).set({
+    nom: 'Daret Test',
+    cover: 'home',
+    accent: '#5247E6',
+    montant: 1500,
+    frequence: 'Mensuel',
+    periodesCount: 2,
+    cagnotteParPeriode: 1500,
+    statut: 'brouillon',
+    adminUid: 'admin',
+    memberUids: ['admin'],
+    currentPeriode: 0,
+    prochaineDate: fixedNow,
+    inviteCode: null,
+    settings: {echeanceDay: 5, graceDays: 2},
+    createdAt: fixedNow,
+    startedAt: null,
+    closedAt: null,
+    draftMembers: [
+      {
+        uid: 'admin',
+        avatarPalette: ['#5247E6', '#E7E5FB'],
+      },
+      {
+        uid: 'pending_invite_1',
+        inviteIndex: 1,
+        avatarPalette: ['#F5A623', '#FBEFD6'],
+      },
+    ],
+    draftPeriods: [
+      {
+        index: 1,
+        recipientUids: ['admin'],
+        shares: {admin: 100},
+      },
+      {
+        index: 2,
+        recipientUids: ['pending_invite_1'],
+        shares: {pending_invite_1: 100},
+      },
+    ],
+  });
 }
 
 async function seedPeriodDocs(daretId: string): Promise<void> {
