@@ -90,8 +90,9 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `test/**/failures/` and `test/goldens/{windows,macos,linux}/` are git-ignored; the gate **fails** if a `failures/` dir exists (a committed failure artifact masked a red sprint in S1).
 
 ## Known Gotchas
-- S3 least-privilege Firestore + Storage rules are implemented locally but **not deployed yet**:
-  deploy only after the Part 2 security audit and a fresh green emulator run.
+- S3 least-privilege Firestore + Storage rules + indexes are **deployed to `tantin-dev`** (Part 3,
+  after the architect security audit). Re-deploy with
+  `firebase deploy --only firestore:rules,firestore:indexes,storage --project tantin-dev`.
 - `firebase.test.json` intentionally avoids the live Storage target. Emulator tests use isolated
   project ID `tantin-rules-test`; live deploys continue to use `firebase.json` + target `main`.
 - CI explicitly installs Temurin JDK 21 before emulator startup; do not rely on the hosted runner's
@@ -105,10 +106,19 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
-- **Current checkpoint:** S3 Part 3 Functions are implemented and deployed to `tantin-dev`; live
-  `firebase functions:list` shows all 13 Functions in `europe-west1`. Local gates pass: root audit
-  clean, Functions audit clean, rules tests pass (19), Functions tests pass (13), and
-  `dart run tool/verify.dart` passes with 47 Flutter tests. Remaining Part 3 work: commit/push and
-  prove GitHub Actions green for the pushed HEAD. Stop before Part 4 screens for architect review.
-- **Done:** S0 setup; S1 design system; **S2 auth & onboarding** — splash/intro/phone/OTP/profile/contacts/home+coachmark, `OtpChannel`+`SmsOtpChannel`, auth-driven go_router redirects, `users/{uid}` least-privilege Firestore rule (deployed). Verified: gate green (33 tests), CI green (goldens excluded per D011).
-- **Next:** S3 — backend shell + read paths (daret data model, Firestore reads, real screens behind the shell). Reuse the design system; add S3 deps just-in-time; every new collection gets a least-privilege rule + (ideally) an emulator rules test.
+- **Current checkpoint:** S3 **Part 4 read screens are done and CI-green** (commit `7b2ead0`, run
+  26881095108: `verify` + `backend` both success). The 5-tab shell is real — Accueil (hero next-action
+  + Ce mois-ci summary + active darets), Mes Darets (segmented), Calendrier (period agenda), Activité
+  (merged log), Profil (stats + settings + logout), plus Notifications and a read-only daret hub stub.
+  Global « + » FAB → Créer/Rejoindre sheet with a **debug-only `seedDev`** action. All from the S1
+  design system + live Firestore streams. `dart run tool/verify.dart` → GATE: PASS (47 tests).
+- **Remaining to close S3:** (a) per-screen **golden tests** — add the test files, then run
+  `flutter test --update-goldens` once to bake baselines (local-only, D011); (b) a device walkthrough
+  (seed → Yasmine sees all 5 tabs matching the prototype); (c) finalize this file + `PROGRESS_S3`;
+  (d) architect final S3 audit + sign-off.
+- **Done:** S0 setup; S1 design system; S2 auth & onboarding; S3 Parts 1–3 (domain + least-privilege
+  rules + indexes + repositories + the 13-Function backend, deployed to `tantin-dev`, rules+functions
+  emulator tests green in CI).
+- **Next sprints:** S4 (create wizard / drag-drop / join — wires `startDaret`/`createInvite`/
+  `joinDaret`/`approveDaret`), S5 (daret hub + two-sided confirmation + payout — replaces the stub),
+  S6 (FCM notifications + polish + release).
