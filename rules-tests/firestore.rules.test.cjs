@@ -4,11 +4,15 @@ const {
   initializeTestEnvironment,
 } = require('@firebase/rules-unit-testing');
 const {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } = require('firebase/firestore');
 
 const projectId = 'tantin-rules-test';
@@ -184,6 +188,20 @@ describe('darets', () => {
   test('a member can read a daret but an outsider cannot', async () => {
     await assertSucceeds(getDoc(doc(db('payer'), 'darets/d1')));
     await assertFails(getDoc(doc(db('outsider'), 'darets/d1')));
+  });
+
+  test('a member can LIST darets filtered by memberUids; broad list denied', async () => {
+    // This mirrors the app's myDarets query and would have caught the
+    // get()-based read rule that broke list queries (PERMISSION_DENIED).
+    await assertSucceeds(
+      getDocs(
+        query(
+          collection(db('payer'), 'darets'),
+          where('memberUids', 'array-contains', 'payer'),
+        ),
+      ),
+    );
+    await assertFails(getDocs(collection(db('payer'), 'darets')));
   });
 
   test('creator can create a strict draft but cannot forge members', async () => {
