@@ -243,8 +243,21 @@ Log overflowed the console, switching to line-by-line logging.
   prove CI green (`dart run tool/check_ci.dart`), deploy any cloud config, and run the Android device
   walkthrough of the create/join/approval flows.
 
+### CI proof — `dart run tool/check_ci.dart`
+```
+ CI gate — CodexRock/tantin-dev @ a3baca3
+ conclusion: success
+ https://github.com/CodexRock/tantin-dev/actions/runs/26917868600
+CI: GREEN ✅
+```
+(CI runs `dart run tool/verify.dart --ci` = format + analyze + logic/widget tests + Android APK build,
+plus the `backend` job = Firestore/Storage rules tests + Functions Jest. Both jobs green.)
+
 ## Commits this sprint
-- `8fd9341` feat(functions): expand S4 daret drafts
+- `8fd9341` feat(functions): expand S4 daret drafts (backend contract, prior session)
+- `587987e` fix(build): drop riverpod codegen for manual Riverpod 2 providers on analyzer 10
+- `a3baca3` feat(daret): S4 create wizard + drag-drop payout + join-by-code + approval
+- Pushed to `origin/main` (`fc4b364..a3baca3`); CI run 26917868600 = success.
 
 ## Definition of Done gate
 - [ ] Every task above is implemented and verified
