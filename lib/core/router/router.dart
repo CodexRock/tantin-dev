@@ -2,15 +2,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:tantin_flutter/core/theme/tokens.dart';
+import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/design_system/gallery/gallery_screen.dart';
+import 'package:tantin_flutter/features/activity/presentation/screens/activite_screen.dart';
 import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
+import 'package:tantin_flutter/features/calendar/presentation/screens/calendrier_screen.dart';
+import 'package:tantin_flutter/features/darets/presentation/screens/daret_hub_stub_screen.dart';
+import 'package:tantin_flutter/features/darets/presentation/screens/mes_darets_screen.dart';
 import 'package:tantin_flutter/features/dashboard/presentation/screens/home_screen.dart';
+import 'package:tantin_flutter/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/contacts_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/intro_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/otp_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/phone_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/profile_setup_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/splash_screen.dart';
+import 'package:tantin_flutter/features/profile/presentation/screens/profil_screen.dart';
+import 'package:tantin_flutter/features/shell/presentation/create_join_sheet.dart';
 
 part 'router.g.dart';
 
@@ -30,6 +39,7 @@ class AppRoutes {
   static const activity = '/activity';
   static const profile = '/profile';
   static const gallery = '/gallery';
+  static const notifications = '/notifications';
 }
 
 class RouterNotifier extends ChangeNotifier {
@@ -121,10 +131,27 @@ GoRouter router(Ref ref) {
         path: AppRoutes.gallery,
         builder: (context, state) => const GalleryScreen(),
       ),
+      GoRoute(
+        path: '/daret/:id',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) =>
+            DaretHubStubScreen(daretId: state.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: AppRoutes.notifications,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const NotificationsScreen(),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return Scaffold(
             body: navigationShell,
+            floatingActionButton: FloatingActionButton(
+              onPressed: () => showCreateJoinSheet(context),
+              backgroundColor: TantinColors.saffron,
+              elevation: 4,
+              child: TnIcons.plus(size: 28, color: TantinColors.ink),
+            ),
             bottomNavigationBar: BottomNavigationBar(
               currentIndex: navigationShell.currentIndex,
               onTap: (index) => navigationShell.goBranch(
@@ -170,8 +197,7 @@ GoRouter router(Ref ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.darets,
-                builder: (context, state) =>
-                    const Center(child: Text('Mes Darets Placeholder')),
+                builder: (context, state) => const MesDaretsScreen(),
               ),
             ],
           ),
@@ -179,8 +205,7 @@ GoRouter router(Ref ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.calendar,
-                builder: (context, state) =>
-                    const Center(child: Text('Calendrier Placeholder')),
+                builder: (context, state) => const CalendrierScreen(),
               ),
             ],
           ),
@@ -188,8 +213,7 @@ GoRouter router(Ref ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.activity,
-                builder: (context, state) =>
-                    const Center(child: Text('Activité Placeholder')),
+                builder: (context, state) => const ActiviteScreen(),
               ),
             ],
           ),
@@ -197,8 +221,7 @@ GoRouter router(Ref ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.profile,
-                builder: (context, state) =>
-                    const Center(child: Text('Profil Placeholder')),
+                builder: (context, state) => const ProfilScreen(),
               ),
             ],
           ),
