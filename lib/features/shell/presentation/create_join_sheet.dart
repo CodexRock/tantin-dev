@@ -1,14 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:tantin_flutter/core/motion/motion.dart';
+import 'package:tantin_flutter/core/router/router.dart';
 import 'package:tantin_flutter/core/theme/tokens.dart';
 import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/features/darets/data/daret_callable_providers.dart';
 
-/// Opens the « + » Créer / Rejoindre sheet. Destinations are built in S4, so
-/// the two real actions show a "coming soon" notice for now; a dev-only seed
-/// action (debug builds) loads the canonical Firestore dataset.
+/// Opens the « + » Créer / Rejoindre sheet. A dev-only seed action (debug
+/// builds) loads the canonical Firestore dataset.
 Future<void> showCreateJoinSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
@@ -58,14 +61,14 @@ class CreateJoinSheet extends ConsumerWidget {
             icon: TnIcons.plus(size: 22, color: TantinColors.majorelle),
             title: 'Créer un daret',
             subtitle: 'Lancez un nouveau cercle et invitez vos proches.',
-            onTap: () => _soon(context, 'La création arrive au sprint S4.'),
+            onTap: () => _go(context, AppRoutes.createDaret),
           ),
           const SizedBox(height: 12),
           _Option(
             icon: TnIcons.qr(size: 22, color: TantinColors.majorelle),
             title: 'Rejoindre avec un code',
             subtitle: "Entrez un code d'invitation reçu d'un proche.",
-            onTap: () => _soon(context, 'Rejoindre arrive au sprint S4.'),
+            onTap: () => _go(context, AppRoutes.joinDaret),
           ),
           if (kDebugMode) ...[
             const SizedBox(height: 12),
@@ -81,10 +84,10 @@ class CreateJoinSheet extends ConsumerWidget {
     );
   }
 
-  void _soon(BuildContext context, String message) {
-    final messenger = ScaffoldMessenger.of(context);
+  void _go(BuildContext context, String route) {
+    final router = GoRouter.of(context);
     Navigator.of(context).pop();
-    messenger.showSnackBar(SnackBar(content: Text(message)));
+    unawaited(router.push<void>(route));
   }
 
   Future<void> _seed(BuildContext context, WidgetRef ref) async {

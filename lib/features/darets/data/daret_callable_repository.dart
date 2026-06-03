@@ -1,5 +1,46 @@
 import 'package:cloud_functions/cloud_functions.dart';
 
+class DaretPreview {
+  const DaretPreview({
+    required this.daretId,
+    required this.nom,
+    required this.cover,
+    required this.accent,
+    required this.montant,
+    required this.frequence,
+    required this.periodesCount,
+    required this.membersCount,
+    required this.pendingInvitesCount,
+    required this.statut,
+  });
+
+  factory DaretPreview.fromMap(Map<String, dynamic> data) {
+    return DaretPreview(
+      daretId: data['daretId'] as String,
+      nom: data['nom'] as String,
+      cover: data['cover'] as String,
+      accent: data['accent'] as String,
+      montant: data['montant'] as int,
+      frequence: data['frequence'] as String,
+      periodesCount: data['periodesCount'] as int,
+      membersCount: data['membersCount'] as int,
+      pendingInvitesCount: data['pendingInvitesCount'] as int? ?? 0,
+      statut: data['statut'] as String,
+    );
+  }
+
+  final String daretId;
+  final String nom;
+  final String cover;
+  final String accent;
+  final int montant;
+  final String frequence;
+  final int periodesCount;
+  final int membersCount;
+  final int pendingInvitesCount;
+  final String statut;
+}
+
 class DaretCallableRepository {
   const DaretCallableRepository(this._functions);
 
@@ -14,12 +55,14 @@ class DaretCallableRepository {
     return data['code'] as String;
   }
 
-  Future<Map<String, dynamic>> previewDaret(String code) {
-    return _callMap('previewDaret', {'code': code});
+  Future<DaretPreview> previewDaret(String code) async {
+    final data = await _callMap('previewDaret', {'code': code});
+    return DaretPreview.fromMap(data);
   }
 
-  Future<void> joinDaret(String code) {
-    return _callVoid('joinDaret', {'code': code});
+  Future<String> joinDaret(String code) async {
+    final data = await _callMap('joinDaret', {'code': code});
+    return data['daretId'] as String;
   }
 
   Future<void> approveDaret(String daretId) {
