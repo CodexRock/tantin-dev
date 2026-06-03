@@ -167,3 +167,43 @@
   callable preserves the security boundary and avoids adding a broad privileged client write or
   loosening nested-doc rules. Placeholders let the creator reserve invite slots without storing contact
   PII and without overfilling the daret before invitees join.
+
+## D025: Drop Riverpod codegen (manual Riverpod 2 providers) + modernize the codegen toolchain to analyzer 10 (S4, unblock)
+- **Decision:** Remove `riverpod_generator`, `riverpod_lint`, `riverpod_annotation`, and `custom_lint`.
+  Keep the **Riverpod 2 RUNTIME** (`flutter_riverpod ^2.6.1`) but declare all providers **manually**
+  (`Provider`/`StreamProvider`/`NotifierProvider`/`StateNotifierProvider`, `.autoDispose`/`.family` as
+  needed) instead of via `@riverpod` codegen. Bump the remaining codegen toolchain to its current
+  (analyzer-10) line: `build_runner ^2.5.4`→resolved **2.15.0**, `freezed ^3.2.0`, `json_serializable
+  ^6.10.0`; this pulls **`analyzer 10.0.1`** (was pinned to 7.6.0). `freezed`+`json_serializable` still
+  generate the model `*.freezed.dart`/`*.g.dart`. Removed the `custom_lint` analyzer plugin from
+  `analysis_options.yaml` and the `Custom lint (riverpod)` step from `tool/verify.dart`.
+- **Root cause this fixes (proven via stack trace, not guessed):** `riverpod_generator 2.6.5` hard-pins
+  `analyzer <8.0.0` → resolved `analyzer 7.6.0` (max language 3.9). When any source_gen builder resolves
+  a library that transitively imports `flutter_localizations` (e.g. `l10n_extension.dart` →
+  `app_localizations` → cupertino localizations), analyzer 7.6.0's **summary2 `BundleWriter`** tries to
+  serialize a constructor parameter **default value** that is a **dot-shorthand** node (a Dart 3.10+
+  feature shipped in the Flutter 3.41.2 ecosystem) and throws
+  `Missing implementation of visitDotShorthandInvocation` from `ThrowingAstVisitor`, then build_runner
+  retry-loops (the "hang"). It is NOT project code, NOT node_modules, NOT cache corruption (a fully clean
+  `flutter clean` + `rm .dart_tool` + `pub get` build crashes identically), and the Flutter SDK is exactly
+  the pinned `90673a4`/`3.41.2`. There is no analyzer 7.x with the fix (7.6.0 is the last 7.x), and a
+  `dependency_override` to analyzer 8+ breaks `riverpod_generator 2.6.5` (it uses removed 7.x element
+  APIs).
+- **Alternatives considered:** (a) Migrate to **Riverpod 3** (keeps `@riverpod` codegen, needs analyzer 8+)
+  — rejected for now: larger API migration/behavioral risk mid-build; logged as **S6 tech-debt**.
+  (b) **Downgrade Flutter** to a Dart ≤3.9 release so analyzer 7.6.0 matches — rejected: contradicts the
+  D018/.metadata/CI pin to 3.41.2 and would force downgrading the bleeding-edge Firebase suite
+  (`firebase_core 4.x`, `cloud_firestore 6.x` need Dart 3.11) — a large, likely-infeasible cascade.
+  (c) Keep Riverpod 2 codegen — impossible: no `riverpod_generator 2.x` supports analyzer 8+.
+- **Why this honors the locked decisions:** §10/D004 says "Riverpod stays on v2 until a deliberate,
+  user-approved migration" — the v2 RUNTIME is preserved; only the optional codegen sugar is dropped.
+  The user explicitly approved this path (unblock now, defer Riverpod 3 to S6).
+- **Conversion notes / call-site changes:** provider names were preserved so `ref.watch(...)` call sites
+  are unchanged, EXCEPT: `myDaretsProvider` lost its unused `{DaretStatus? status}` family key and is now
+  a plain provider (call `myDaretsProvider`, not `myDaretsProvider()`); `currentContributionsProvider`
+  takes a single `(String daretId, int periodIndex)` **record** family key (call
+  `currentContributionsProvider((id, period))`). `firebase_providers`, repository, and stream providers
+  are `.autoDispose` to match the old `@riverpod` default; `CurrentPhone`/`CurrentVerificationId` are
+  keepAlive `NotifierProvider`s (were `@Riverpod(keepAlive: true)`); `routerProvider` is a keepAlive
+  `Provider<GoRouter>`. Deleted the S0 throwaway smoke files (`lib/core/models/smoke_model.dart`,
+  `lib/core/providers/smoke_provider.dart`).

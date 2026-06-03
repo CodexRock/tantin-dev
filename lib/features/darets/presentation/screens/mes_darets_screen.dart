@@ -23,7 +23,7 @@ class _MesDaretsScreenState extends ConsumerState<MesDaretsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final daretsAsync = ref.watch(myDaretsProvider());
+    final daretsAsync = ref.watch(myDaretsProvider);
     return Scaffold(
       backgroundColor: TantinColors.ivoryBg,
       body: SafeArea(

@@ -33,7 +33,7 @@ class CalendrierScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final uid = ref.watch(authStateChangesProvider).valueOrNull?.uid;
-    final darets = ref.watch(myDaretsProvider()).valueOrNull ?? const <Daret>[];
+    final darets = ref.watch(myDaretsProvider).valueOrNull ?? const <Daret>[];
     final active = darets.where((d) => d.statut == DaretStatus.actif).toList();
 
     final items = <_CalItem>[];

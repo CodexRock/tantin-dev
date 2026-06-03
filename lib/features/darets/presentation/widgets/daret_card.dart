@@ -212,7 +212,10 @@ class _Footer extends ConsumerWidget {
         final contribs =
             ref
                 .watch(
-                  currentContributionsProvider(daret.id, daret.currentPeriode),
+                  currentContributionsProvider((
+                    daret.id,
+                    daret.currentPeriode,
+                  )),
                 )
                 .valueOrNull ??
             const <Contribution>[];

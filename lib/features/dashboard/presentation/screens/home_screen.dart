@@ -37,7 +37,7 @@ class HomeScreen extends ConsumerWidget {
         ref.watch(notificationsProvider).valueOrNull ??
         const <AppNotification>[];
     final unread = notifs.where((n) => n.unread).length;
-    final darets = ref.watch(myDaretsProvider()).valueOrNull ?? const <Daret>[];
+    final darets = ref.watch(myDaretsProvider).valueOrNull ?? const <Daret>[];
     final active = darets.where((d) => d.statut == DaretStatus.actif).toList();
 
     final periodsByDaret = <String, List<DaretPeriod>>{};
@@ -47,7 +47,7 @@ class HomeScreen extends ConsumerWidget {
           ref.watch(periodsProvider(d.id)).valueOrNull ?? const <DaretPeriod>[];
       contribsByDaret[d.id] =
           ref
-              .watch(currentContributionsProvider(d.id, d.currentPeriode))
+              .watch(currentContributionsProvider((d.id, d.currentPeriode)))
               .valueOrNull ??
           const <Contribution>[];
     }

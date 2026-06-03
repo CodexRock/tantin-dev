@@ -1,6 +1,6 @@
 # Tant'in Context
 
-**Current Sprint:** S3 Part 3 - Cloud Functions deployed, commit/CI checkpoint pending
+**Current Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
 
 ## Project Status
 Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
@@ -8,7 +8,7 @@ Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Fire
   - `+212 6 00 00 00 00` (code `123456`)
   - `+212 6 11 11 11 11` (code `111111`)
 
-The app boots to a placeholder 5-tab shell; a dev-only gallery route renders every component. S1 design system & component library are built and golden-tested.
+The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only gallery route renders every component. S1 design system & component library are built and golden-tested.
 
 ## Architecture & Folder Map
 - `lib/core/`: Application-wide concerns (routing, formatting, tokens, theme, providers, motion).
@@ -16,6 +16,11 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - `lib/core/firebase/firestore_helpers.dart`: Shared Firestore `Timestamp`/map/list conversion helpers.
 - `lib/features/darets/`: Freezed daret/member/period/contribution/invite models, pure domain logic,
   Firestore mappers, stream repositories, Riverpod providers, and callable wrappers.
+- `lib/features/create_daret/`: S4 create wizard draft domain/controller/repository and UI. The
+  wizard writes a rules-allowed draft root, then calls deployed Functions for privileged start/invite
+  work.
+- `lib/features/join_daret/`: S4 join-by-code and approval review UI. Join/approval writes go through
+  callable wrappers only.
 - `functions/`: TypeScript Cloud Functions v2 in `europe-west1`. Callables wrap testable handlers with
   zod validation, auth, and App Check checks. Admin SDK writes all server-owned daret integrity fields
   (`statut`, `currentPeriode`, `memberUids`, period `status`/aggregates, contributions, members,
@@ -30,7 +35,12 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 
 ## Key Conventions
 - **Feature-first architecture:** Upcoming sprints will organize by feature (e.g. `lib/features/daret/`).
-- **State Management:** Riverpod 2 with codegen (`riverpod_annotation`, `riverpod_generator`).
+- **State Management:** Riverpod 2 **runtime** with **manual providers** (NO codegen). `riverpod_generator`/
+  `riverpod_lint`/`riverpod_annotation`/`custom_lint` were removed in S4 because they pinned `analyzer <8`,
+  which crashes on the Dart 3.11 ecosystem (see DECISIONS D025). Declare providers by hand
+  (`Provider`/`StreamProvider`/`NotifierProvider`/`StateNotifierProvider`, `.autoDispose`/`.family`) with
+  an **explicit type annotation** (very_good_analysis `specify_nonobvious_property_types`). Riverpod 3
+  migration is deferred to S6 (tech-debt).
 - **Models:** `freezed` + `json_serializable`.
 - **Firestore mapping:** Domain entities serialize JSON with generated code; Firestore mappers are
   explicit so `Timestamp` conversion and document IDs stay visible and testable.
@@ -39,7 +49,9 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 
 ## Environment / Setup Commands
 - `flutter pub get`: Fetch dependencies.
-- `dart run build_runner build --delete-conflicting-outputs`: Generate Riverpod providers, Freezed models, JSON serialization, and GoRouter routes.
+- `dart run build_runner build`: Generate Freezed models + JSON serialization (`*.freezed.dart`/`*.g.dart`).
+  build_runner is `2.15.0` (analyzer 10) — the old `--delete-conflicting-outputs` flag was removed (it is
+  now the default). Providers are NOT generated (manual since S4, D025).
 - `flutter gen-l10n`: Generate localizations.
 - `npm install`: Resolve the pinned backend rules-test toolchain and refresh `package-lock.json`.
 - From `functions/`, `npm install`: Resolve the pinned Functions toolchain and refresh
@@ -69,7 +81,8 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 ## Testing & CI
 - **Canonical gate: `dart run tool/verify.dart`** — the single source of truth for "is it green?".
   Runs pub get, gen-l10n, build_runner, `dart format --set-exit-if-changed`, `flutter analyze
-  --fatal-infos`, `dart run custom_lint`, and `flutter test`; prints `GATE: PASS`/`GATE: FAIL`.
+  --fatal-infos`, and `flutter test`; prints `GATE: PASS`/`GATE: FAIL`. (The `custom_lint` step was
+  removed in S4 with riverpod_lint — see D025.)
   Use `--fast` to skip pub/codegen for quick re-checks, `--ci` to also build the APK.
 - **Never check a Definition-of-Done box without pasting this gate's output** (see the Operating
   Manual's Prime Directive). CI runs the same script (`dart run tool/verify.dart --ci`); the only
@@ -102,7 +115,14 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
 - **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
 - **App Check enforcement is OFF in dev** (`enforceAppCheck = false` in `functions/src/index.ts`) — the test device's Play Integrity kept failing ("Too many attempts") and blocked every callable. Auth + Firestore rules still protect all data. **MUST re-enable before release (S6).** See DECISIONS D022.
-- Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
+- Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build` after a fresh
+  clone (CI does this automatically). See DECISIONS D004.
+- **Codegen + analyzer (S4, D025):** if `build_runner` ever crashes with
+  `Missing implementation of visitDotShorthandInvocation` (analyzer summary linker) + hangs, the cause is
+  an `analyzer <8` being resolved against the Dart 3.11 ecosystem. Toolchain is now `analyzer 10` /
+  `build_runner 2.15` / `freezed ^3.2` / `json_serializable ^6.10`, and riverpod codegen is gone — do NOT
+  re-add `riverpod_generator`/`riverpod_lint` (they pin `analyzer <8` and reintroduce the crash). If a
+  build hangs, also kill stray concurrent `dart` processes (multiple build_runners corrupt `.dart_tool`).
 - Dependency set is just-in-time. Remaining packages (confetti is in via motion; contacts/image-picker/permissions, mocktail, fake_cloud_firestore, integration_test) are added in the sprint that first needs them.
 - Do not commit service-account JSON keys or FCM server keys.
 
@@ -123,3 +143,30 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
 - **Next sprints:** S4 (create wizard / drag-drop / join — wires `startDaret`/`createInvite`/
   `joinDaret`/`approveDaret`), S5 (daret hub + two-sided confirmation + payout — replaces the stub),
   S6 (FCM notifications + polish + release).
+
+## S4 Handoff - 2026-06-03
+- **Backend committed:** `8fd9341 feat(functions): expand S4 daret drafts`. This adds the S4 draft
+  expansion contract: the client creates one rules-allowed draft root with `draftMembers` and
+  `draftPeriods`; `startDaret` expands it into server-owned member/period docs; `joinDaret` replaces a
+  generic `pending_*` placeholder with the real caller UID. Root rules and emulator tests were updated.
+- **Flutter UI implemented but uncommitted:** create wizard, drag/drop payout ordering, group split
+  editor, createDraft -> startDaret -> createInvite flow, join preview/confirm, approval review,
+  approve button, and share_plus invite sharing. S4 feature tests and goldens were added under
+  `test/features/create_daret/` and `test/features/join_daret/`.
+- **Last proven S4 Flutter evidence before the blocker:** targeted S4 analyze passed; S4 golden update
+  passed; `flutter test test\features\create_daret test\features\join_daret` passed with 8 tests. See
+  `.agent/PROGRESS_S4.md` for exact pasted output.
+- **Current blocker:** canonical `dart run tool/verify.dart` is NOT green. It stalls/fails in the
+  `Codegen reproduces` step. Isolated
+  `dart run build_runner build --delete-conflicting-outputs` logs
+  `Missing implementation of visitDotShorthandInvocation` from analyzer while `riverpod_generator`
+  processes `lib/core/router/router.dart`, plus
+  `SDK language version 3.11.0 is newer than analyzer language version 3.9.0`.
+- **Important uncommitted experiment:** `lib/core/router/router.dart` was converted from generated
+  `@riverpod GoRouter router` to a manual `Provider<GoRouter>` preserving `routerProvider`. This did
+  not fix the build_runner blocker. The next agent should decide whether to keep it or revert it after
+  resolving the analyzer/tooling issue.
+- **Dirty worktree warning:** `.agent/PROGRESS_S3.md` was already dirty before S4 work. Do not stage it
+  unless explicitly instructed. S4 UI/tests/docs are also dirty and uncommitted.
+- **No DoD completion claim is valid yet:** no final local gate, deploy, device E2E, push, or CI proof
+  has been completed after the S4 Flutter work.

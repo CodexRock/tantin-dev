@@ -4,31 +4,26 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-part 'firebase_providers.g.dart';
+// Manual Riverpod 2 providers (no codegen; see DECISIONS D025).
 
-@riverpod
-FirebaseAuth firebaseAuth(Ref ref) {
-  return FirebaseAuth.instance;
-}
+final AutoDisposeProvider<FirebaseAuth> firebaseAuthProvider =
+    Provider.autoDispose<FirebaseAuth>((ref) => FirebaseAuth.instance);
 
-@riverpod
-FirebaseFirestore firebaseFirestore(Ref ref) {
-  return FirebaseFirestore.instance;
-}
+final AutoDisposeProvider<FirebaseFirestore> firebaseFirestoreProvider =
+    Provider.autoDispose<FirebaseFirestore>(
+      (ref) => FirebaseFirestore.instance,
+    );
 
-@riverpod
-FirebaseFunctions firebaseFunctions(Ref ref) {
-  return FirebaseFunctions.instanceFor(region: 'europe-west1');
-}
+final AutoDisposeProvider<FirebaseFunctions> firebaseFunctionsProvider =
+    Provider.autoDispose<FirebaseFunctions>(
+      (ref) => FirebaseFunctions.instanceFor(region: 'europe-west1'),
+    );
 
-@riverpod
-FirebaseMessaging firebaseMessaging(Ref ref) {
-  return FirebaseMessaging.instance;
-}
+final AutoDisposeProvider<FirebaseMessaging> firebaseMessagingProvider =
+    Provider.autoDispose<FirebaseMessaging>(
+      (ref) => FirebaseMessaging.instance,
+    );
 
-@riverpod
-FirebaseStorage firebaseStorage(Ref ref) {
-  return FirebaseStorage.instance;
-}
+final AutoDisposeProvider<FirebaseStorage> firebaseStorageProvider =
+    Provider.autoDispose<FirebaseStorage>((ref) => FirebaseStorage.instance);

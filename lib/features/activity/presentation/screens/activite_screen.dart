@@ -23,7 +23,7 @@ class ActiviteScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final darets = ref.watch(myDaretsProvider()).valueOrNull ?? const <Daret>[];
+    final darets = ref.watch(myDaretsProvider).valueOrNull ?? const <Daret>[];
     final items = <_Item>[];
     for (final d in darets) {
       final events =

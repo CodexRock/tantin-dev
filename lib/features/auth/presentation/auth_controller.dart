@@ -2,13 +2,17 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
 
-part 'auth_controller.g.dart';
+// Manual Riverpod 2 providers (no codegen; see DECISIONS D025).
 
-@riverpod
-class AuthController extends _$AuthController {
+final authControllerProvider =
+    AutoDisposeNotifierProvider<AuthController, AsyncValue<void>>(
+      AuthController.new,
+    );
+
+class AuthController extends AutoDisposeNotifier<AsyncValue<void>> {
   @override
   AsyncValue<void> build() {
     return const AsyncData(null);
@@ -134,8 +138,11 @@ class AuthController extends _$AuthController {
   }
 }
 
-@Riverpod(keepAlive: true)
-class CurrentPhone extends _$CurrentPhone {
+final currentPhoneProvider = NotifierProvider<CurrentPhone, String>(
+  CurrentPhone.new,
+);
+
+class CurrentPhone extends Notifier<String> {
   @override
   String build() => '';
 
@@ -143,8 +150,12 @@ class CurrentPhone extends _$CurrentPhone {
   void updatePhone(String phone) => state = phone;
 }
 
-@Riverpod(keepAlive: true)
-class CurrentVerificationId extends _$CurrentVerificationId {
+final currentVerificationIdProvider =
+    NotifierProvider<CurrentVerificationId, String>(
+      CurrentVerificationId.new,
+    );
+
+class CurrentVerificationId extends Notifier<String> {
   @override
   String build() => '';
 

@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:tantin_flutter/core/theme/tokens.dart';
 import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/design_system/gallery/gallery_screen.dart';
 import 'package:tantin_flutter/features/activity/presentation/screens/activite_screen.dart';
 import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
 import 'package:tantin_flutter/features/calendar/presentation/screens/calendrier_screen.dart';
+import 'package:tantin_flutter/features/create_daret/presentation/screens/create_daret_screen.dart';
 import 'package:tantin_flutter/features/darets/presentation/screens/daret_hub_stub_screen.dart';
 import 'package:tantin_flutter/features/darets/presentation/screens/mes_darets_screen.dart';
 import 'package:tantin_flutter/features/dashboard/presentation/screens/home_screen.dart';
+import 'package:tantin_flutter/features/join_daret/presentation/screens/approval_screen.dart';
+import 'package:tantin_flutter/features/join_daret/presentation/screens/join_daret_screen.dart';
 import 'package:tantin_flutter/features/notifications/presentation/screens/notifications_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/contacts_screen.dart';
 import 'package:tantin_flutter/features/onboarding/presentation/screens/intro_screen.dart';
@@ -20,8 +22,6 @@ import 'package:tantin_flutter/features/onboarding/presentation/screens/profile_
 import 'package:tantin_flutter/features/onboarding/presentation/screens/splash_screen.dart';
 import 'package:tantin_flutter/features/profile/presentation/screens/profil_screen.dart';
 import 'package:tantin_flutter/features/shell/presentation/create_join_sheet.dart';
-
-part 'router.g.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 final shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -40,6 +40,9 @@ class AppRoutes {
   static const profile = '/profile';
   static const gallery = '/gallery';
   static const notifications = '/notifications';
+  static const createDaret = '/create-daret';
+  static const joinDaret = '/join-daret';
+  static const approval = '/approval';
 }
 
 class RouterNotifier extends ChangeNotifier {
@@ -56,8 +59,8 @@ class RouterNotifier extends ChangeNotifier {
   }
 }
 
-@riverpod
-GoRouter router(Ref ref) {
+// Manual Riverpod 2 provider (no codegen; see DECISIONS D025).
+final routerProvider = Provider<GoRouter>((ref) {
   final notifier = RouterNotifier(ref);
 
   return GoRouter(
@@ -141,6 +144,24 @@ GoRouter router(Ref ref) {
         path: AppRoutes.notifications,
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) => const NotificationsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.createDaret,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const CreateDaretScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.joinDaret,
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => const JoinDaretScreen(),
+      ),
+      GoRoute(
+        path: '${AppRoutes.approval}/:id',
+        parentNavigatorKey: rootNavigatorKey,
+        builder: (context, state) => ApprovalScreen(
+          daretId: state.pathParameters['id']!,
+          inviteCode: state.uri.queryParameters['code'],
+        ),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
@@ -229,4 +250,4 @@ GoRouter router(Ref ref) {
       ),
     ],
   );
-}
+});

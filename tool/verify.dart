@@ -42,23 +42,31 @@ Future<void> main(List<String> args) async {
     if (!fast) const _Step('Resolve dependencies', 'flutter', ['pub', 'get']),
     if (!fast) const _Step('Generate l10n', 'flutter', ['gen-l10n']),
     if (!fast)
+      // build_runner >=2.15 deletes conflicting outputs by default and rejects
+      // the old --delete-conflicting-outputs flag, so it is no longer passed.
       const _Step('Codegen reproduces', 'dart', [
         'run',
         'build_runner',
         'build',
-        '--delete-conflicting-outputs',
       ]),
+    // Scope to the dirs we own. Formatting `.` makes dart_style recurse into
+    // the git-ignored `node_modules/` (the backend rules-test harness) and
+    // crash reading a vendored template's analysis_options.yaml. `functions/`
+    // is TypeScript. See DECISIONS D025.
     const _Step('Format check', 'dart', [
       'format',
       '--set-exit-if-changed',
-      '.',
+      'lib',
+      'test',
+      'tool',
     ]),
     // --fatal-infos: an info-level lint is a failure. We hold a zero-issue bar.
     const _Step('Static analysis', 'flutter', ['analyze', '--fatal-infos']),
-    // The custom_lint analyzer plugin (riverpod_lint) must START and pass.
-    // CI historically skipped this, which is exactly why a crashing plugin went
-    // unnoticed. Never remove this step.
-    const _Step('Custom lint (riverpod)', 'dart', ['run', 'custom_lint']),
+    // NOTE: the custom_lint (riverpod_lint) step was removed in S4 — riverpod
+    // codegen/lint was dropped because it pinned analyzer <8.0.0, which is
+    // incompatible with the Flutter 3.41.2 / Dart 3.11 ecosystem (the analyzer
+    // 7.6.0 summary linker crashes on dot-shorthand in dependency APIs). The
+    // app stays on Riverpod 2 with MANUAL providers. See DECISIONS D025.
     // Golden tests are platform-sensitive (Skia rasterizes shadows/gradients/
     // blur/SVG differently per OS). Baselines are authored on the dev's machine,
     // so goldens run LOCALLY but are EXCLUDED in CI (Linux). CI still runs all
