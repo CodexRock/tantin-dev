@@ -11,6 +11,7 @@ import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_logic.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
 import 'package:tantin_flutter/features/darets/presentation/widgets/daret_card.dart';
+import 'package:tantin_flutter/features/dashboard/presentation/widgets/smart_card.dart';
 import 'package:tantin_flutter/features/notifications/data/notification_providers.dart';
 import 'package:tantin_flutter/features/notifications/domain/app_notification.dart';
 import 'package:tantin_flutter/features/profile/data/user_providers.dart';
@@ -103,12 +104,12 @@ class HomeScreen extends ConsumerWidget {
             if (next != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
-                child: _SmartCard(
+                child: SmartCard(
                   action: next,
                   daret: _firstOrNull(
                     active.where((d) => d.id == next.daretId),
                   ),
-                  onTap: () => context.push('/daret/${next.daretId}'),
+                  onOpen: () => context.push('/daret/${next.daretId}'),
                 ),
               ),
             _MonthSummary(entrees: entrees, sorties: sorties),
@@ -246,141 +247,6 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SmartCard extends StatelessWidget {
-  const _SmartCard({required this.action, required this.daret, this.onTap});
-
-  final DashboardNextAction action;
-  final Daret? daret;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isPay = action.type == DashboardActionType.payContribution;
-    final label = isPay ? 'À FAIRE MAINTENANT' : 'BIENTÔT';
-    final lead = isPay ? 'Votre part pour' : 'Vous recevez pour';
-    final name = daret?.nom ?? 'votre daret';
-    return Pressable(
-      onPressed: onTap,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [TantinColors.majorelle, TantinColors.majorelleDeep],
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x66352DA8),
-              offset: Offset(0, 16),
-              blurRadius: 40,
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-              decoration: BoxDecoration(
-                color: const Color(0x38F5A623),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TnIcons.bolt(size: 14, color: const Color(0xFFF5C76A)),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: Color(0xFFFCDFA6),
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text.rich(
-              TextSpan(
-                text: '$lead ',
-                style: const TextStyle(
-                  color: Color(0xD1FFFFFF),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-                children: [
-                  TextSpan(
-                    text: name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              TantinFormat.fmtDH(action.amount),
-              style: const TextStyle(
-                fontFamily: 'Fraunces',
-                color: Colors.white,
-                fontSize: 44,
-                height: 1,
-                letterSpacing: -1.3,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                TnIcons.clock(size: 15, color: const Color(0xB3FFFFFF)),
-                const SizedBox(width: 7),
-                Text(
-                  'Échéance le ${TantinDates.dayMonth(action.date)}',
-                  style: const TextStyle(
-                    color: Color(0xB3FFFFFF),
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: TantinColors.saffron,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: const Text(
-                      'Voir le daret',
-                      style: TextStyle(
-                        color: Color(0xFF2A1B05),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }

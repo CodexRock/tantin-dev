@@ -101,6 +101,7 @@ The app boots to a placeholder 5-tab shell; a dev-only gallery route renders eve
   `3.x`, because Dart formatter output changed in Flutter 3.44/Dart 3.12 (D018).
 - Firestore (Native Mode) has a **baseline `request.auth != null` rule deployed** (not open test mode). Full least-privilege state-machine rules come in a later sprint.
 - **Storage rules ARE deployed** to `tantin-dev` via a storage target (`.firebaserc` maps target `main` → `tantin-dev.firebasestorage.app`; `firebase.json` storage block references it). Baseline `request.auth != null`. `firebase deploy --only storage --project tantin-dev` works.
+- **App Check enforcement is OFF in dev** (`enforceAppCheck = false` in `functions/src/index.ts`) — the test device's Play Integrity kept failing ("Too many attempts") and blocked every callable. Auth + Firestore rules still protect all data. **MUST re-enable before release (S6).** See DECISIONS D022.
 - Generated `*.g.dart`/`*.freezed.dart` are git-ignored — run `dart run build_runner build --delete-conflicting-outputs` after a fresh clone (CI does this automatically). See DECISIONS D004.
 - Dependency set is just-in-time. Remaining packages (confetti is in via motion; contacts/image-picker/permissions, mocktail, fake_cloud_firestore, integration_test) are added in the sprint that first needs them.
 - Do not commit service-account JSON keys or FCM server keys.

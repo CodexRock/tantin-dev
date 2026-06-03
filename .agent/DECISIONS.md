@@ -132,3 +132,23 @@
 - **Rationale:** S3 read screens need real Firestore data, offline cache, and rules-compatible shapes.
   Mapping the current signed-in user to Yasmine lets a developer seed the canonical prototype dataset
   without test-only UI data or client-side privileged writes.
+
+## D022: App Check enforcement disabled in dev (S3 Part 4) — RE-ENABLE FOR RELEASE
+- **Decision:** Cloud Functions enforce App Check via a single flag `enforceAppCheck` in
+  `functions/src/index.ts`, currently set to **`false`**. The Flutter app keeps the App Check debug
+  provider wired (fixed debug token `a8303487-…` in `kDebugMode`) for when enforcement returns.
+- **Rationale:** The physical test device's Play Integrity repeatedly failed with
+  "Too many attempts", and the debug-token exchange was rate-limited, so every App Check-enforced
+  callable (e.g. `seedDev`) was rejected with `unauthenticated` — blocking all device testing. Auth +
+  the least-privilege Firestore rules still protect all data; App Check is only an anti-abuse layer.
+- **⚠️ MUST re-enable before release (tracked in S6):** flip `enforceAppCheck = true`, restore the
+  callable-guard test assertion, and get a working attestation path (Play Integrity on a real device
+  and/or a registered debug token). Without it, the phone-auth backend is exposed to SMS-pumping/abuse.
+
+## D023: Accueil hero extracted to a public `SmartCard` widget (S3 Part 4)
+- **Decision:** The dashboard hero is `lib/features/dashboard/presentation/widgets/smart_card.dart`
+  (public, plain-props `StatelessWidget`), styled to the prototype (majorelle gradient, corner zellige
+  star, "à faire maintenant" badge, big amount, échéance, "J'ai payé ma part" + chevron buttons).
+- **Rationale:** The first blind-built hero was too simple vs the prototype; extracting it makes it
+  prototype-faithful, reusable, and golden-testable with plain data (no provider overrides). The
+  primary button's real behaviour (declare-paid / receive) lands in S5; it navigates to the daret now.
