@@ -1,7 +1,7 @@
 # PROGRESS - Sprint S4: Create Wizard + Drag-Drop + Join
 
 **Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
-**Started:** 2026-06-03     **Status:** Device bug fixes CI GREEN; Functions deploy and device retest pending
+**Started:** 2026-06-03     **Status:** Device bug fixes CI GREEN; Functions deploy user-reported; device retest pending
 **Prereqs verified:** Y
 
 ## Objective
@@ -115,6 +115,10 @@ remain Function-owned.
 - 2026-06-04 - User reran `dart run tool/verify.dart` after the period-share/auth fixes. Fresh gate is
   green for the current device-bug-fix tree: dependencies, l10n, codegen, format, static analysis, and
   tests all passed; tests ended at `00:28 +59: All tests passed!`; final line was `GATE: PASS`.
+- 2026-06-04 - User reported running `firebase deploy --only functions --project tantin-dev` after the
+  device-bug-fix commits were pushed. Deploy output was not pasted, so this is recorded as user-reported
+  deployment rather than command-output evidence. Post-fix physical-device retest is planned for
+  2026-06-05.
 
 ## Verification evidence
 
@@ -294,10 +298,11 @@ Log overflowed the console, switching to line-by-line logging.
   - `test/features/create_daret/presentation/goldens/ci/s4_create_daret_wizard.png`
   - `test/features/join_daret/presentation/goldens/ci/s4_join_approval.png`
 - Device walkthrough result: **[~] BLOCKED pending post-fix device retest.** The
-  first physical create run found blockers; the fixed Functions bundle still
-  needs deployment, then the S3 regression screens and S4 create/invite/join/
-  approve flow must be rerun on device. The agent cannot run Flutter/device
-  commands in this environment and must not claim that result.
+  first physical create run found blockers; the fixed Functions bundle deploy
+  is user-reported complete but deploy output was not pasted. The S3 regression
+  screens and S4 create/invite/join/approve flow must be rerun on device. The
+  agent cannot run Flutter/device commands in this environment and must not
+  claim that result.
 
 ## Self-review vs S4 spec (2026-06-04)
 - Wizard/spec: 5-step create flow is present (identity, money/rhythm, members, order/periods, recap),
@@ -327,10 +332,10 @@ Log overflowed the console, switching to line-by-line logging.
   riverpod codegen (manual Riverpod 2 providers) + moving the toolchain to analyzer 10. Gate now green
   (see Verification evidence). Riverpod 3 migration is logged as **S6 tech-debt**.
 - [~] BLOCKED pending post-fix device report: rerun the Android walkthrough for S3 regression reads plus S4
-  create/invite/join/approve after deploying the updated Functions bundle. Capture any runtime error,
+  create/invite/join/approve after the user-reported Functions deploy. Capture any runtime error,
   overflow, callable failure, or wrong/empty data.
 - [x] RESOLVED: user ran `dart run tool/verify.dart` after the device bug fixes and pasted `GATE: PASS`.
-- [~] BLOCKED pending device retest after deploying the updated Functions bundle: creation submit must no
+- [~] BLOCKED pending device retest after the user-reported Functions deploy: creation submit must no
   longer return `[firebase_functions/unauthenticated]`, and grouped shares must show/pay/receive correctly.
 - [x] RESOLVED: CI is green for pushed HEAD `1673c1c` (run 26922657221, `backend` + `verify` success).
 
@@ -363,7 +368,8 @@ plus the `backend` job = Firestore/Storage rules tests + Functions Jest. Both jo
 - [~] `CONTEXT.md`, `DECISIONS.md`, and this file are current; final device result still needs recording
 - [x] All S4 work committed per task and pushed
 - [x] No secrets/private keys committed
-- [~] Cloud config changes deployed and verified live or marked blocked
+- [~] Cloud config changes deployed and verified live or marked blocked; Functions deploy is user-reported,
+  output not pasted, and live device proof is pending
 - [ ] Sprint S4 complete summary posted
 
 **Sprint sign-off:** Pending.

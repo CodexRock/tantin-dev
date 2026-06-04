@@ -136,7 +136,8 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   recipients split one period share for both monthly payments and payouts. A callable auth guard now
   force-refreshes the Firebase ID token before each callable. `npm test` is PASS after this fix, the
   user-run `dart run tool/verify.dart` is PASS for this tree, and CI run 26922657221 is GREEN for pushed
-  HEAD `1673c1c`. Functions deploy and physical-device retest are still required.
+  HEAD `1673c1c`. User reports `firebase deploy --only functions --project tantin-dev` has been run, but
+  deploy output was not pasted; physical-device retest is still required.
 - **Supersedes older bullets below:** the previous S3/S4 handoff notes in this section are historical and
   should not be used as the current state.
 
