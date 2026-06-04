@@ -46,10 +46,10 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - [ ] T13 — Tests + docs (CONTEXT/DECISIONS/this file); goldens for new screens with committed baselines
 
 ## Work log
-- 2026-06-04 12:07 — Read operating manual, CONTEXT, DECISIONS, S5 prompt, and prototype sources (`hub.jsx`, `hub2.jsx`, `app.jsx`). Confirmed baseline HEAD `710a140` (S5 progress skeleton) with S4 sign-off at `8158fc4`. Began Part 1 only per sprint gate. commit: pending
-- 2026-06-04 12:07 — Replaced the read-only hub stub with `DaretHubScreen`: live header, current-period beneficiary card, contributor checklist/state actions (UI-only until Part 2), progress ring, Périodes/Membres/Activité tabs, and router wiring. Added focused widget test `test/features/darets/presentation/daret_hub_screen_test.dart`. Gate pending user-run `dart run tool\verify.dart` (sprint brief forbids agent-run Dart/npm/Firebase/gcloud). commit: pending
-- 2026-06-04 12:22 — User-run Part 1 gate returned `GATE: FAIL`: analyzer infos in `daret_hub_screen.dart` plus a widget-test expectation mismatch on the member tab. Fixed the reported analyzer nits and changed the test to assert the actual admin/beneficiary subtitle (`Admin · Bénéficiaire actuel`). Awaiting rerun. commit: pending
-- 2026-06-04 12:35 — User reran `dart run tool\verify.dart`; Part 1 gate is green (`GATE: PASS`). Checked T1–T3 only. commit: pending
+- 2026-06-04 12:07 — Read operating manual, CONTEXT, DECISIONS, S5 prompt, and prototype sources (`hub.jsx`, `hub2.jsx`, `app.jsx`). Confirmed baseline HEAD `710a140` (S5 progress skeleton) with S4 sign-off at `8158fc4`. Began Part 1 only per sprint gate. commit: 99a3c1b
+- 2026-06-04 12:07 — Replaced the read-only hub stub with `DaretHubScreen`: live header, current-period beneficiary card, contributor checklist/state actions (UI-only until Part 2), progress ring, Périodes/Membres/Activité tabs, and router wiring. Added focused widget test `test/features/darets/presentation/daret_hub_screen_test.dart`. Gate pending user-run `dart run tool\verify.dart` (sprint brief forbids agent-run Dart/npm/Firebase/gcloud). commit: 99a3c1b
+- 2026-06-04 12:22 — User-run Part 1 gate returned `GATE: FAIL`: analyzer infos in `daret_hub_screen.dart` plus a widget-test expectation mismatch on the member tab. Fixed the reported analyzer nits and changed the test to assert the actual admin/beneficiary subtitle (`Admin · Bénéficiaire actuel`). Awaiting rerun. commit: 99a3c1b
+- 2026-06-04 12:35 — User reran `dart run tool\verify.dart`; Part 1 gate is green (`GATE: PASS`). Checked T1–T3 only. commit: 99a3c1b
 
 ## Verification evidence (PASTE REAL OUTPUT — no adjectives, per the Prime Directive)
 
@@ -105,7 +105,7 @@ GATE: PASS ✅  — safe to check DoD boxes.
 - {others | none}
 
 ## Commits this sprint
-- {hash} {message}
+- 99a3c1b feat(darets): build live daret hub
 
 ## ── DEFINITION OF DONE (gate) ──
 > Legend: `[x]` done & verified this session · `[~] BLOCKED: reason` · `[ ]` not yet.
