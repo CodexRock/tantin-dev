@@ -149,6 +149,32 @@ describe('invites and join flow', () => {
     expect(activity.data()).toMatchObject({type: 'membre', actorUid: 'joiner'});
   });
 
+  test('joinDaret accepts a single-name user (empty nom)', async () => {
+    // Regression: the profile setup allows an empty last name, so the client
+    // writes `nom: ''`. readRequiredProfile used requireString('nom'), which
+    // rejected empty strings and broke join with "nom must be a string".
+    await seedUser('admin', 'Admin');
+    await seedUser('joiner', 'Yasmine', '');
+    await seedDraftDaret('d1', ['admin'], 'admin', 2);
+    await db.collection('invites').doc('TANTIN-OPEN').set({
+      daretId: 'd1',
+      createdByUid: 'admin',
+      active: true,
+      expiresAt: Timestamp.fromDate(new Date('2026-06-09T09:00:00Z')),
+    });
+
+    const result = await __testables.joinDaretHandler(ctx('joiner', {code: 'TANTIN-OPEN'}), deps());
+
+    expect(result).toEqual({daretId: 'd1', joined: true});
+    const member = await db.collection('darets').doc('d1').collection('members').doc('joiner').get();
+    expect(member.data()).toMatchObject({
+      uid: 'joiner',
+      prenom: 'Yasmine',
+      name: 'Yasmine',
+      initials: 'Y',
+    });
+  });
+
   test('joinDaret rejects inactive invites and full darets', async () => {
     await seedUser('admin', 'Admin');
     await seedUser('joiner', 'Joiner');
@@ -483,12 +509,12 @@ describe('triggers and seed', () => {
   });
 });
 
-async function seedUser(uid: string, prenom: string): Promise<void> {
+async function seedUser(uid: string, prenom: string, nom = 'Test'): Promise<void> {
   await db.collection('users').doc(uid).set({
     prenom,
-    nom: 'Test',
-    name: `${prenom} Test`,
-    initials: `${prenom[0] ?? 'T'}T`,
+    nom,
+    name: nom.length > 0 ? `${prenom} ${nom}` : prenom,
+    initials: `${prenom[0] ?? 'T'}${nom.length > 0 ? nom[0] : ''}`.toUpperCase(),
     phone: '+212600000000',
     photoUrl: null,
     avatarPalette: ['#5247E6', '#E7E5FB'],

@@ -1068,7 +1068,12 @@ function readRequiredProfile(uid: string, snapshot: DocumentSnapshot): PersonPro
   return {
     uid,
     prenom: requireString(data, 'prenom'),
-    nom: requireString(data, 'nom'),
+    // `nom` (last name) is OPTIONAL by product design: the profile setup lets a
+    // user enter only a Prénom (Moroccan single-name reality + "don't over-ask"),
+    // so the client legitimately writes `nom: ''`. requireString rejects empty
+    // strings, which broke joinDaret for any single-name user. Mirror the
+    // tolerance already used in readPendingDraftProfile.
+    nom: optionalString(data, 'nom') ?? '',
     name: requireString(data, 'name'),
     initials: requireString(data, 'initials'),
     phone: requireString(data, 'phone'),
