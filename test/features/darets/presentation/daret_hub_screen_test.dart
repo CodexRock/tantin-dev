@@ -347,7 +347,7 @@ void main() {
     expect(find.text('Supprimer le daret'), findsOneWidget);
   });
 
-  testWidgets('manage sheet hides reorder/replace once payments start', (
+  testWidgets('manage sheet greys out reorder/replace once locked', (
     tester,
   ) async {
     // Default daret is on period 2 → arrangement is locked.
@@ -360,8 +360,10 @@ void main() {
 
     expect(find.text('Modifier les détails'), findsOneWidget);
     expect(find.text('Supprimer le daret'), findsOneWidget);
-    expect(find.text("Réorganiser l'ordre"), findsNothing);
-    expect(find.text('Remplacer un membre'), findsNothing);
+    // Still visible, but greyed out with a locked hint.
+    expect(find.text("Réorganiser l'ordre"), findsOneWidget);
+    expect(find.text('Remplacer un membre'), findsOneWidget);
+    expect(find.text('Verrouillé après le 1er paiement'), findsNWidgets(2));
   });
 
   testWidgets('delete guard stays locked until the daret name is typed', (

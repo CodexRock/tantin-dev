@@ -282,9 +282,14 @@
   provider-fed behaviour; the interaction tests verify the actual admin gating/guards, which is the risk.
 
 ## D030: reorder/replace are locked once the first payment is recorded (S5, device feedback)
-- **Decision (supersedes the availability rule in D028):** `reorderPeriods` and `replaceMember` are only
-  permitted while the daret is **active, still on its first tour (`currentPeriode == 1`), and no payment
-  has been recorded** (no contribution in `attente`/`confirme`). Once anyone declares/confirms a payment,
+- **Decision (supersedes the availability rule in D028; refined after device round 3):** `reorderPeriods`
+  and `replaceMember` are permitted while the daret is **still forming or just started — status `attente`
+  OR `actif`, on its first tour (`currentPeriode == 1`), and no payment has been recorded** (no
+  contribution in `attente`/`confirme`). `attente` matters: a freshly created daret whose other members
+  have not approved yet sits in `attente`, and that is precisely when the admin wants to rearrange (the
+  original `actif`-only gate hid the rows on every new daret). The two menu rows are **always shown but
+  greyed out with a "Verrouillé après le 1er paiement" hint** once locked (owner preference — clearer
+  than hiding). Once anyone declares/confirms a payment,
   the order and membership are final — changing them afterwards would let someone who has already paid
   lose their turn. Enforced server-side by `requireNotStarted(currentPeriode)` + `assertNoPaymentRecorded`
   in both callables, and mirrored in the hub: the "Réorganiser/Remplacer" rows only render when the

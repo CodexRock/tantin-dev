@@ -836,8 +836,9 @@ async function reorderPeriodsHandler(
     const daretSnapshot = await transaction.get(daretRef);
     const daret = requireExistingData(daretSnapshot, 'daret');
     requireAdmin(daret, context.uid);
-    if (requireStatus(daret) !== 'actif') {
-      fail('failed-precondition', 'Only active darets can be reorganised.');
+    const status = requireStatus(daret);
+    if (status !== 'actif' && status !== 'attente') {
+      fail('failed-precondition', 'Only a daret that has not started can be reorganised.');
     }
     const memberUids = requireStringArray(daret, 'memberUids');
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
@@ -932,8 +933,9 @@ async function replaceMemberHandler(
     const daretSnapshot = await transaction.get(daretRef);
     const daret = requireExistingData(daretSnapshot, 'daret');
     requireAdmin(daret, context.uid);
-    if (requireStatus(daret) !== 'actif') {
-      fail('failed-precondition', 'Only active darets can replace a member.');
+    const status = requireStatus(daret);
+    if (status !== 'actif' && status !== 'attente') {
+      fail('failed-precondition', 'Only a daret that has not started can replace a member.');
     }
     const memberUids = requireStringArray(daret, 'memberUids');
     const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');

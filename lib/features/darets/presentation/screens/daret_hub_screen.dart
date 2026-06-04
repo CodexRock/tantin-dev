@@ -99,10 +99,12 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final isAdmin = uid != null && uid == daret.adminUid;
     // The order/members can only be rearranged before the daret advances past
     // its first tour AND before any payment is recorded — see requireNotStarted
-    // / assertNoPaymentRecorded on the backend. After that it is locked.
+    // / assertNoPaymentRecorded on the backend. This holds while the daret is
+    // still forming (attente) or just active with no payment yet.
     final arrangeable =
-        daret.statut == DaretStatus.actif &&
-        daret.currentPeriode == 1 &&
+        (daret.statut == DaretStatus.actif ||
+            daret.statut == DaretStatus.attente) &&
+        daret.currentPeriode <= 1 &&
         contributions.every(
           (contribution) =>
               contribution.state != ContributionState.attente &&
@@ -856,25 +858,39 @@ class _AdminMenuSheet extends StatelessWidget {
           ),
           // Réorganiser / remplacer are only possible before the daret advances
           // and before the first payment is recorded (server enforces the same
-          // via requireNotStarted / assertNoPaymentRecorded); hide them once the
-          // arrangement is locked so the admin never hits a rejection.
-          if (arrangeable) ...[
-            const SizedBox(height: 8),
-            _AdminMenuRow(
-              icon: TnIcons.stack(size: 19, color: TantinColors.majorelle),
-              label: "Réorganiser l'ordre",
-              sub: 'Changer l’ordre des tours à venir',
-              onPressed: () => Navigator.of(context).pop(_AdminAction.reorder),
+          // via requireNotStarted / assertNoPaymentRecorded). They stay visible
+          // but greyed out once the arrangement is locked.
+          const SizedBox(height: 8),
+          _AdminMenuRow(
+            icon: TnIcons.stack(
+              size: 19,
+              color: arrangeable
+                  ? TantinColors.majorelle
+                  : TantinColors.inkMuted,
             ),
-            const SizedBox(height: 8),
-            _AdminMenuRow(
-              icon: TnIcons.users(size: 19, color: TantinColors.majorelle),
-              label: 'Remplacer un membre',
-              sub: 'Libérer une place et ré-inviter',
-              onPressed: () =>
-                  Navigator.of(context).pop(_AdminAction.replaceMember),
+            label: "Réorganiser l'ordre",
+            sub: arrangeable
+                ? 'Changer l’ordre des tours à venir'
+                : 'Verrouillé après le 1er paiement',
+            disabled: !arrangeable,
+            onPressed: () => Navigator.of(context).pop(_AdminAction.reorder),
+          ),
+          const SizedBox(height: 8),
+          _AdminMenuRow(
+            icon: TnIcons.users(
+              size: 19,
+              color: arrangeable
+                  ? TantinColors.majorelle
+                  : TantinColors.inkMuted,
             ),
-          ],
+            label: 'Remplacer un membre',
+            sub: arrangeable
+                ? 'Libérer une place et ré-inviter'
+                : 'Verrouillé après le 1er paiement',
+            disabled: !arrangeable,
+            onPressed: () =>
+                Navigator.of(context).pop(_AdminAction.replaceMember),
+          ),
           const SizedBox(height: 14),
           _AdminMenuRow(
             icon: TnIcons.trash(size: 19, color: TantinColors.danger),
@@ -898,6 +914,7 @@ class _AdminMenuRow extends StatelessWidget {
     required this.sub,
     required this.onPressed,
     this.danger = false,
+    this.disabled = false,
   });
 
   final Widget icon;
@@ -905,58 +922,63 @@ class _AdminMenuRow extends StatelessWidget {
   final String sub;
   final VoidCallback onPressed;
   final bool danger;
+  final bool disabled;
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onPressed: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: TantinColors.ivorySunken,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: danger
-                    ? TantinColors.danger.withValues(alpha: 0.1)
-                    : TantinColors.majorelleSoft,
-                borderRadius: BorderRadius.circular(12),
+    return Opacity(
+      opacity: disabled ? 0.5 : 1,
+      child: Pressable(
+        onPressed: disabled ? null : onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: TantinColors.ivorySunken,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: danger
+                      ? TantinColors.danger.withValues(alpha: 0.1)
+                      : TantinColors.majorelleSoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: icon,
               ),
-              child: icon,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: danger ? TantinColors.danger : TantinColors.ink,
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w700,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: danger ? TantinColors.danger : TantinColors.ink,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    sub,
-                    style: const TextStyle(
-                      color: TantinColors.inkMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                    const SizedBox(height: 1),
+                    Text(
+                      sub,
+                      style: const TextStyle(
+                        color: TantinColors.inkMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (!danger) TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
-          ],
+              if (!danger)
+                TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
+            ],
+          ),
         ),
       ),
     );

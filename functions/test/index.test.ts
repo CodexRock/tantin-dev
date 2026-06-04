@@ -528,6 +528,27 @@ describe('admin management (Part 4)', () => {
     expect(activity.data()).toMatchObject({type: 'tour', actorUid: 'admin'});
   });
 
+  test('reorderPeriods works before activation (attente daret)', async () => {
+    await seedAttenteReorderDaret('d1');
+
+    const result = await __testables.reorderPeriodsHandler(
+      ctx('admin', {
+        daretId: 'd1',
+        periods: [
+          {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
+          {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+        ] as PeriodAssignment[],
+      }),
+      deps(),
+    );
+
+    expect(result).toEqual({updated: 2});
+    const p2 = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p2.data()).toMatchObject({recipientUids: ['recipient']});
+    expect(p3.data()).toMatchObject({recipientUids: ['payer']});
+  });
+
   test('replaceMember swaps an unserved member and rejects served/admin/non-admin', async () => {
     await seedReplaceDaret('d1');
 
@@ -1124,6 +1145,18 @@ async function seedReorderDaret(daretId: string): Promise<void> {
   await seedPeriodDoc(daretId, 2, 'payer', 'upcoming');
   await seedPeriodDoc(daretId, 3, 'recipient', 'upcoming');
   await seedCurrentContributions(daretId, 1, 'admin', ['payer', 'recipient']);
+}
+
+async function seedAttenteReorderDaret(daretId: string): Promise<void> {
+  // Pre-activation: members still approving, no contributions exist yet.
+  await seedUser('admin', 'Admin');
+  await seedUser('payer', 'Payer');
+  await seedUser('recipient', 'Recipient');
+  await seedDraftDaret(daretId, ['admin', 'payer', 'recipient'], 'admin', 3, 'attente', 'pending');
+  await db.collection('darets').doc(daretId).update({currentPeriode: 1});
+  await seedPeriodDoc(daretId, 1, 'admin', 'upcoming');
+  await seedPeriodDoc(daretId, 2, 'payer', 'upcoming');
+  await seedPeriodDoc(daretId, 3, 'recipient', 'upcoming');
 }
 
 async function seedReplaceDaret(daretId: string): Promise<void> {
