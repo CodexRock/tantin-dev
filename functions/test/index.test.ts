@@ -22,6 +22,12 @@ function ctx<T>(uid: string, data: T): {uid: string; appId: string; data: T} {
   return {uid, appId: 'test-app', data};
 }
 
+type PeriodAssignment = {
+  index: number;
+  recipientUids: string[];
+  shares: Record<string, number>;
+};
+
 beforeAll(() => {
   if (process.env.FIRESTORE_EMULATOR_HOST === undefined) {
     throw new Error('FIRESTORE_EMULATOR_HOST must be set by firebase emulators:exec.');
@@ -453,6 +459,237 @@ describe('daret state integrity', () => {
   });
 });
 
+describe('admin management (Part 4)', () => {
+  test('reorderPeriods swaps upcoming recipients and rejects non-admin/illegal targets', async () => {
+    await seedReorderDaret('d1');
+
+    await expectCodeAsync(
+      __testables.reorderPeriodsHandler(
+        ctx('payer', {
+          daretId: 'd1',
+          periods: [
+            {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
+            {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+          ] as PeriodAssignment[],
+        }),
+        deps(),
+      ),
+      'permission-denied',
+    );
+    // Cannot touch the current period.
+    await expectCodeAsync(
+      __testables.reorderPeriodsHandler(
+        ctx('admin', {
+          daretId: 'd1',
+          periods: [
+            {index: 1, recipientUids: ['payer'], shares: {payer: 100}},
+          ] as PeriodAssignment[],
+        }),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+    // Assigning an already-served member breaks the once-each invariant.
+    await expectCodeAsync(
+      __testables.reorderPeriodsHandler(
+        ctx('admin', {
+          daretId: 'd1',
+          periods: [
+            {index: 2, recipientUids: ['admin'], shares: {admin: 100}},
+          ] as PeriodAssignment[],
+        }),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+
+    const result = await __testables.reorderPeriodsHandler(
+      ctx('admin', {
+        daretId: 'd1',
+        periods: [
+          {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
+          {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+        ] as PeriodAssignment[],
+      }),
+      deps(),
+    );
+
+    expect(result).toEqual({updated: 2});
+    const p2 = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p2.data()).toMatchObject({recipientUids: ['recipient'], shares: {recipient: 100}});
+    expect(p3.data()).toMatchObject({recipientUids: ['payer'], shares: {payer: 100}});
+    const activity = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('activity')
+      .doc('reorder-20260602-1')
+      .get();
+    expect(activity.data()).toMatchObject({type: 'tour', actorUid: 'admin'});
+  });
+
+  test('replaceMember swaps an unserved member and rejects served/admin/non-admin', async () => {
+    await seedReplaceDaret('d1');
+
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('recipient', {daretId: 'd1', fromUid: 'recipient', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'permission-denied',
+    );
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('admin', {daretId: 'd1', fromUid: 'admin', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+    // payer already received in the closed period 1.
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('admin', {daretId: 'd1', fromUid: 'payer', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+
+    const result = await __testables.replaceMemberHandler(
+      ctx('admin', {daretId: 'd1', fromUid: 'recipient', toUid: 'newcomer'}),
+      deps(),
+    );
+
+    expect(result).toEqual({replaced: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.memberUids).toEqual(['admin', 'payer', 'newcomer']);
+    const oldMember = await db.collection('darets').doc('d1').collection('members').doc('recipient').get();
+    const newMember = await db.collection('darets').doc('d1').collection('members').doc('newcomer').get();
+    expect(oldMember.exists).toBe(false);
+    expect(newMember.data()).toMatchObject({uid: 'newcomer', role: 'member', approvalStatus: 'approved'});
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p3.data()).toMatchObject({recipientUids: ['newcomer'], shares: {newcomer: 100}});
+    const movedContribution = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('02')
+      .collection('contributions')
+      .doc('newcomer')
+      .get();
+    expect(movedContribution.data()).toMatchObject({payerUid: 'newcomer', state: 'apayer', amount: 1500});
+    const oldContribution = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('02')
+      .collection('contributions')
+      .doc('recipient')
+      .get();
+    expect(oldContribution.exists).toBe(false);
+  });
+
+  test('replaceMember placeholder mode opens a vacant seat with a fresh invite code', async () => {
+    await seedReplaceDaret('d1');
+
+    const result = await __testables.replaceMemberHandler(
+      ctx('admin', {daretId: 'd1', fromUid: 'recipient'}),
+      deps(),
+    );
+
+    expect(result).toEqual({replaced: true, code: 'TANTIN-7K2P', placeholderUid: 'pending_7k2p'});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.memberUids).toEqual(['admin', 'payer', 'pending_7k2p']);
+    expect(daret.data()?.inviteCode).toBe('TANTIN-7K2P');
+    const seat = await db.collection('darets').doc('d1').collection('members').doc('pending_7k2p').get();
+    expect(seat.data()).toMatchObject({uid: 'pending_7k2p', approvalStatus: 'pending', prenom: 'Invitation'});
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p3.data()).toMatchObject({recipientUids: ['pending_7k2p'], shares: {pending_7k2p: 100}});
+    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    expect(liveTour.data()?.totalCount).toBe(1);
+    const invite = await db.collection('invites').doc('TANTIN-7K2P').get();
+    expect(invite.data()).toMatchObject({daretId: 'd1', active: true});
+  });
+
+  test('joinDaret fills a re-invited seat on an active daret as an approved member', async () => {
+    await seedReplaceDaret('d1');
+    await __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps());
+    await seedUser('joiner', 'Joiner');
+
+    const result = await __testables.joinDaretHandler(ctx('joiner', {code: 'TANTIN-7K2P'}), deps());
+
+    expect(result).toEqual({daretId: 'd1', joined: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.memberUids).toEqual(['admin', 'payer', 'joiner']);
+    expect(daret.data()?.statut).toBe('actif');
+    const seat = await db.collection('darets').doc('d1').collection('members').doc('pending_7k2p').get();
+    expect(seat.exists).toBe(false);
+    const joiner = await db.collection('darets').doc('d1').collection('members').doc('joiner').get();
+    expect(joiner.data()).toMatchObject({uid: 'joiner', role: 'member', approvalStatus: 'approved'});
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p3.data()).toMatchObject({recipientUids: ['joiner'], shares: {joiner: 100}});
+  });
+
+  test('editDaretDetails updates cosmetics, rejects non-admin, empty and closed darets', async () => {
+    await seedReorderDaret('d1');
+
+    await expectCodeAsync(
+      __testables.editDaretDetailsHandler(ctx('payer', {daretId: 'd1', nom: 'Pirate'}), deps()),
+      'permission-denied',
+    );
+    await expectCodeAsync(
+      __testables.editDaretDetailsHandler(ctx('admin', {daretId: 'd1'}), deps()),
+      'invalid-argument',
+    );
+
+    const result = await __testables.editDaretDetailsHandler(
+      ctx('admin', {daretId: 'd1', nom: 'Daret Renommé', cover: 'star', accent: '#2E9E6B'}),
+      deps(),
+    );
+    expect(result).toEqual({updated: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()).toMatchObject({nom: 'Daret Renommé', cover: 'star', accent: '#2E9E6B'});
+
+    await db.collection('darets').doc('d1').update({statut: 'termine'});
+    await expectCodeAsync(
+      __testables.editDaretDetailsHandler(ctx('admin', {daretId: 'd1', nom: 'Trop tard'}), deps()),
+      'failed-precondition',
+    );
+  });
+
+  test('deleteDaret removes the daret, its subcollections and invite; rejects non-admin', async () => {
+    await seedReorderDaret('d1');
+    await db.collection('darets').doc('d1').update({inviteCode: 'TANTIN-DEL1'});
+    await db.collection('invites').doc('TANTIN-DEL1').set({
+      daretId: 'd1',
+      createdByUid: 'admin',
+      active: true,
+      expiresAt: fixedNow,
+    });
+
+    await expectCodeAsync(
+      __testables.deleteDaretHandler(ctx('payer', {daretId: 'd1'}), deps()),
+      'permission-denied',
+    );
+
+    const result = await __testables.deleteDaretHandler(ctx('admin', {daretId: 'd1'}), deps());
+    expect(result).toEqual({deleted: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.exists).toBe(false);
+    const members = await db.collection('darets').doc('d1').collection('members').get();
+    expect(members.size).toBe(0);
+    const contributions = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .get();
+    expect(contributions.size).toBe(0);
+    const invite = await db.collection('invites').doc('TANTIN-DEL1').get();
+    expect(invite.exists).toBe(false);
+  });
+});
+
 describe('triggers and seed', () => {
   test('onContributionWritten recomputes paidCount and writes idempotent payment activity', async () => {
     await seedActiveDaretWithContributions('d1', 'attente');
@@ -789,6 +1026,86 @@ async function seedFinalPeriodReadyDaret(daretId: string): Promise<void> {
     confirmedAt: null,
     confirmedByUid: null,
   });
+}
+
+async function seedPeriodDoc(
+  daretId: string,
+  index: number,
+  recipientUid: string,
+  status: 'upcoming' | 'current' | 'closed',
+): Promise<void> {
+  await db
+    .collection('darets')
+    .doc(daretId)
+    .collection('periods')
+    .doc(index.toString().padStart(2, '0'))
+    .set({
+      index,
+      recipientUids: [recipientUid],
+      shares: {[recipientUid]: 100},
+      scheduledDate: Timestamp.fromDate(new Date(`2026-0${5 + index}-02T09:00:00Z`)),
+      potAmount: 3000,
+      status,
+      paidCount: 0,
+      totalCount: 2,
+      closedAt: status === 'closed' ? fixedNow : null,
+    });
+}
+
+async function seedCurrentContributions(
+  daretId: string,
+  periodIndex: number,
+  recipientUid: string,
+  payerUids: string[],
+): Promise<void> {
+  const periodRef = db
+    .collection('darets')
+    .doc(daretId)
+    .collection('periods')
+    .doc(periodIndex.toString().padStart(2, '0'));
+  await periodRef.collection('contributions').doc(recipientUid).set({
+    payerUid: recipientUid,
+    state: 'recipient',
+    amount: 0,
+    paidDeclaredAt: null,
+    confirmedAt: null,
+    confirmedByUid: null,
+  });
+  for (const uid of payerUids) {
+    await periodRef.collection('contributions').doc(uid).set({
+      payerUid: uid,
+      state: 'apayer',
+      amount: 1500,
+      paidDeclaredAt: null,
+      confirmedAt: null,
+      confirmedByUid: null,
+    });
+  }
+}
+
+async function seedReorderDaret(daretId: string): Promise<void> {
+  await seedUser('admin', 'Admin');
+  await seedUser('payer', 'Payer');
+  await seedUser('recipient', 'Recipient');
+  await seedDraftDaret(daretId, ['admin', 'payer', 'recipient'], 'admin', 3, 'actif', 'approved');
+  await db.collection('darets').doc(daretId).update({currentPeriode: 1});
+  await seedPeriodDoc(daretId, 1, 'admin', 'current');
+  await seedPeriodDoc(daretId, 2, 'payer', 'upcoming');
+  await seedPeriodDoc(daretId, 3, 'recipient', 'upcoming');
+  await seedCurrentContributions(daretId, 1, 'admin', ['payer', 'recipient']);
+}
+
+async function seedReplaceDaret(daretId: string): Promise<void> {
+  await seedUser('admin', 'Admin');
+  await seedUser('payer', 'Payer');
+  await seedUser('recipient', 'Recipient');
+  await seedUser('newcomer', 'Newcomer');
+  await seedDraftDaret(daretId, ['admin', 'payer', 'recipient'], 'admin', 3, 'actif', 'approved');
+  await db.collection('darets').doc(daretId).update({currentPeriode: 2});
+  await seedPeriodDoc(daretId, 1, 'payer', 'closed');
+  await seedPeriodDoc(daretId, 2, 'admin', 'current');
+  await seedPeriodDoc(daretId, 3, 'recipient', 'upcoming');
+  await seedCurrentContributions(daretId, 2, 'admin', ['payer', 'recipient']);
 }
 
 function expectCode(callback: () => unknown, code: string): void {

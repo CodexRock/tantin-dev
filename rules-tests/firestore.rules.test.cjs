@@ -5,6 +5,7 @@ const {
 } = require('@firebase/rules-unit-testing');
 const {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -265,6 +266,22 @@ describe('darets', () => {
         currentPeriode: 1,
       }),
     );
+  });
+
+  test('admin has no client path for active-daret structural ops (Function-only)', async () => {
+    // Part 4 admin ops (editDaretDetails / reorderPeriods / deleteDaret) run
+    // only through admin callables. Prove the active daret has no client write
+    // path so the rules are not silently loosened.
+    await assertFails(
+      updateDoc(doc(db('admin'), 'darets/d1'), { nom: 'Forced edit' }),
+    );
+    await assertFails(
+      updateDoc(doc(db('admin'), 'darets/d1/periods/01'), {
+        recipientUids: ['payer'],
+        shares: { payer: 100 },
+      }),
+    );
+    await assertFails(deleteDoc(doc(db('admin'), 'darets/d1')));
   });
 });
 

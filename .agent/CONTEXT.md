@@ -156,9 +156,15 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   `DaretHubScreen` with header, current-period card, contributor states/actions, progress ring,
   Périodes/Membres/Activité tabs, and a focused widget test. User-run `dart run tool\verify.dart`
   printed `GATE: PASS` on 2026-06-04; T1–T3 are checked in `PROGRESS_S5.md`.
-- **Next in S5:** wire the `apayer→attente→confirmé` two-sided lifecycle (« J'ai payé
-  ma part » / « Reçu »), « Relancer » nudges, and the mandatory Part-2 security checkpoint. S5 deploys
-  4 new callables (advancePeriod, closePeriod, closeDaret, sendNudge) — **grant their Cloud Run invoker
-  bindings on first device call** (D027). Put a hard security checkpoint on the confirmation core
-  (rules must deny non-recipient/non-admin confirms and cross-member declares).
+- **S5 Parts 1–3 done, gate-green & architect-reviewed (HEAD 0ccbed4):** live hub, two-sided
+  confirmation core + Part-2 security checkpoint, payout celebration + clôture.
+- **S5 Part 4 (admin) implemented, pending the gate.** Four Function-only admin callables added
+  (`reorderPeriods`, `replaceMember`, `editDaretDetails`, `deleteDaret`) — no rules loosened; the
+  active-daret root/period/member/contribution docs stay Function-owned (new rules deny test proves it).
+  `joinDaret` extended to complete a re-invite into an active daret. Hub gear → `Gérer le daret` menu +
+  sub-sheets (edit / réorganiser upcoming tours / remplacer via re-invite placeholder / supprimer with
+  type-to-confirm). "Mettre en pause" intentionally deferred; "adjust amounts" folded into
+  `reorderPeriods` (D028). Goldens: interaction widget tests + device walkthrough, no new alchemist
+  golden (D029). **S5 now deploys 8 callables total — the 4 above PLUS advancePeriod/closePeriod/
+  closeDaret/sendNudge all need their Cloud Run invoker bindings on first device call (D027).**
 - **Then S6 — FCM notifications + polish + release**, which also RE-ENABLES App Check (reverses D022).

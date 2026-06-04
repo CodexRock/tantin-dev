@@ -101,6 +101,49 @@ class DaretCallableRepository {
     );
   }
 
+  Future<void> reorderPeriods({
+    required String daretId,
+    required List<Map<String, dynamic>> periods,
+  }) {
+    return _callVoid('reorderPeriods', {
+      'daretId': daretId,
+      'periods': periods,
+    });
+  }
+
+  /// Placeholder (re-invite) mode when [toUid] is null: returns the invite code
+  /// for the freshly opened seat. Direct mode returns null.
+  Future<String?> replaceMember({
+    required String daretId,
+    required String fromUid,
+    String? toUid,
+  }) async {
+    final data = await _callMap('replaceMember', {
+      'daretId': daretId,
+      'fromUid': fromUid,
+      'toUid': ?toUid,
+    });
+    return data['code'] as String?;
+  }
+
+  Future<void> editDaretDetails({
+    required String daretId,
+    String? nom,
+    String? cover,
+    String? accent,
+  }) {
+    return _callVoid('editDaretDetails', {
+      'daretId': daretId,
+      'nom': ?nom,
+      'cover': ?cover,
+      'accent': ?accent,
+    });
+  }
+
+  Future<void> deleteDaret(String daretId) {
+    return _callVoid('deleteDaret', {'daretId': daretId});
+  }
+
   Future<void> seedDev() {
     return _callVoid('seedDev', {});
   }

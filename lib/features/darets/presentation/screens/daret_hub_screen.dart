@@ -161,7 +161,18 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                 context.go('/darets');
               }
             },
-            onHeaderAction: null,
+            onManage: isAdmin
+                ? () => unawaited(
+                    _openAdminSheet(
+                      daret: daret,
+                      members: members,
+                      periods: periods,
+                      membersByUid: membersByUid,
+                      accent: accent,
+                    ),
+                  )
+                : null,
+            onShare: null,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
@@ -392,6 +403,166 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     }
   }
 
+  Future<void> _openAdminSheet({
+    required Daret daret,
+    required List<DaretMember> members,
+    required List<DaretPeriod> periods,
+    required Map<String, DaretMember> membersByUid,
+    required Color accent,
+  }) async {
+    final action = await _showAdminMenuSheet(context, daret: daret);
+    if (action == null || !mounted) return;
+    switch (action) {
+      case _AdminAction.editDetails:
+        await _handleEditDetails(daret);
+      case _AdminAction.reorder:
+        await _handleReorder(daret, periods, membersByUid, accent);
+      case _AdminAction.replaceMember:
+        await _handleReplaceMember(daret, periods, members);
+      case _AdminAction.delete:
+        await _handleDeleteDaret(daret);
+    }
+  }
+
+  Future<void> _handleEditDetails(Daret daret) async {
+    final result = await _showEditDetailsSheet(context, daret: daret);
+    if (result == null || !mounted) return;
+    await _runHubAction(
+      busyKey: _adminKey('edit', daret.id),
+      successMessage: 'Détails mis à jour',
+      failurePrefix: 'Modification impossible',
+      action: () => ref
+          .read(daretCallableRepositoryProvider)
+          .editDaretDetails(
+            daretId: daret.id,
+            nom: result.nom,
+            cover: result.cover,
+            accent: result.accent,
+          ),
+    );
+  }
+
+  Future<void> _handleReorder(
+    Daret daret,
+    List<DaretPeriod> periods,
+    Map<String, DaretMember> membersByUid,
+    Color accent,
+  ) async {
+    final upcoming =
+        periods
+            .where(
+              (period) =>
+                  period.status == PeriodStatus.upcoming &&
+                  period.index > daret.currentPeriode,
+            )
+            .toList()
+          ..sort((left, right) => left.index.compareTo(right.index));
+    if (upcoming.length < 2) {
+      _showSnack('Aucun tour à venir à réorganiser.');
+      return;
+    }
+    final newOrder = await _showReorderSheet(
+      context,
+      upcoming: upcoming,
+      membersByUid: membersByUid,
+      accent: accent,
+    );
+    if (newOrder == null || !mounted) return;
+
+    final payload = <Map<String, dynamic>>[];
+    for (var index = 0; index < upcoming.length; index++) {
+      final slot = upcoming[index];
+      final assignment = newOrder[index];
+      if (assignment.id == slot.id) continue;
+      payload.add({
+        'index': slot.index,
+        'recipientUids': assignment.recipientUids,
+        'shares': assignment.shares,
+      });
+    }
+    if (payload.isEmpty) {
+      _showSnack('L’ordre est inchangé.');
+      return;
+    }
+    await _runHubAction(
+      busyKey: _adminKey('reorder', daret.id),
+      successMessage: 'Ordre des tours mis à jour',
+      failurePrefix: 'Réorganisation impossible',
+      action: () => ref
+          .read(daretCallableRepositoryProvider)
+          .reorderPeriods(daretId: daret.id, periods: payload),
+    );
+  }
+
+  Future<void> _handleReplaceMember(
+    Daret daret,
+    List<DaretPeriod> periods,
+    List<DaretMember> members,
+  ) async {
+    final replaceable = <DaretMember>[];
+    for (final member in members) {
+      if (member.uid == daret.adminUid) continue;
+      final servedAlready = periods.any(
+        (period) =>
+            period.recipientUids.contains(member.uid) &&
+            period.status != PeriodStatus.upcoming,
+      );
+      final hasUpcoming = periods.any(
+        (period) =>
+            period.recipientUids.contains(member.uid) &&
+            period.status == PeriodStatus.upcoming,
+      );
+      if (!servedAlready && hasUpcoming) replaceable.add(member);
+    }
+    if (replaceable.isEmpty) {
+      _showSnack('Aucun membre remplaçable (tours déjà passés).');
+      return;
+    }
+    final target = await _showReplaceMemberPickSheet(
+      context,
+      candidates: replaceable,
+    );
+    if (target == null || !mounted) return;
+    final confirmed = await _showReplaceConfirmSheet(context, member: target);
+    if (confirmed != true || !mounted) return;
+
+    final busyKey = _adminKey('replace', daret.id);
+    if (_busyKeys.contains(busyKey)) return;
+    setState(() => _busyKeys.add(busyKey));
+    String? code;
+    try {
+      code = await ref
+          .read(daretCallableRepositoryProvider)
+          .replaceMember(daretId: daret.id, fromUid: target.uid);
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _busyKeys.remove(busyKey));
+      _showSnack('Remplacement impossible : $error');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busyKeys.remove(busyKey));
+    _showSnack('${target.prenom} retiré — partagez le code');
+    if (code != null && mounted) {
+      await _showReplaceShareSheet(context, daret: daret, code: code);
+    }
+  }
+
+  Future<void> _handleDeleteDaret(Daret daret) async {
+    final confirmed = await _showDeleteDaretSheet(context, daret: daret);
+    if (confirmed != true || !mounted) return;
+    final done = await _runHubAction(
+      busyKey: _adminKey('delete', daret.id),
+      successMessage: 'Daret supprimé',
+      failurePrefix: 'Suppression impossible',
+      action: () =>
+          ref.read(daretCallableRepositoryProvider).deleteDaret(daret.id),
+    );
+    if (done && mounted) {
+      context.go('/darets');
+    }
+  }
+
   Future<bool> _runHubAction({
     required String busyKey,
     required String successMessage,
@@ -505,6 +676,911 @@ Future<bool?> _showCloseDaretSheet(
     isScrollControlled: true,
     builder: (_) => _CloseDaretSheet(daret: daret),
   );
+}
+
+// ─────────────────────────── Admin (Part 4) ───────────────────────────
+
+enum _AdminAction { editDetails, reorder, replaceMember, delete }
+
+class _EditDetailsResult {
+  const _EditDetailsResult({
+    required this.nom,
+    required this.cover,
+    required this.accent,
+  });
+
+  final String nom;
+  final String cover;
+  final String accent;
+}
+
+const List<String> _accentPresets = [
+  '#5247E6',
+  '#352DA8',
+  '#F5A623',
+  '#C75B39',
+  '#2E9E6B',
+  '#D2483F',
+];
+
+Future<_AdminAction?> _showAdminMenuSheet(
+  BuildContext context, {
+  required Daret daret,
+}) {
+  return showModalBottomSheet<_AdminAction>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _AdminMenuSheet(daret: daret),
+  );
+}
+
+Future<_EditDetailsResult?> _showEditDetailsSheet(
+  BuildContext context, {
+  required Daret daret,
+}) {
+  return showModalBottomSheet<_EditDetailsResult>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _EditDetailsSheet(daret: daret),
+  );
+}
+
+Future<List<DaretPeriod>?> _showReorderSheet(
+  BuildContext context, {
+  required List<DaretPeriod> upcoming,
+  required Map<String, DaretMember> membersByUid,
+  required Color accent,
+}) {
+  return showModalBottomSheet<List<DaretPeriod>>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ReorderSheet(
+      upcoming: upcoming,
+      membersByUid: membersByUid,
+      accent: accent,
+    ),
+  );
+}
+
+Future<DaretMember?> _showReplaceMemberPickSheet(
+  BuildContext context, {
+  required List<DaretMember> candidates,
+}) {
+  return showModalBottomSheet<DaretMember>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ReplaceMemberPickSheet(candidates: candidates),
+  );
+}
+
+Future<bool?> _showReplaceConfirmSheet(
+  BuildContext context, {
+  required DaretMember member,
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ReplaceConfirmSheet(member: member),
+  );
+}
+
+Future<void> _showReplaceShareSheet(
+  BuildContext context, {
+  required Daret daret,
+  required String code,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ReplaceShareSheet(daret: daret, code: code),
+  );
+}
+
+Future<bool?> _showDeleteDaretSheet(
+  BuildContext context, {
+  required Daret daret,
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _DeleteDaretSheet(daret: daret),
+  );
+}
+
+class _AdminMenuSheet extends StatelessWidget {
+  const _AdminMenuSheet({required this.daret});
+
+  final Daret daret;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Gérer le daret',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            daret.nom,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _AdminMenuRow(
+            icon: TnIcons.edit(size: 19, color: TantinColors.majorelle),
+            label: 'Modifier les détails',
+            sub: 'Nom, couverture, couleur',
+            onPressed: () =>
+                Navigator.of(context).pop(_AdminAction.editDetails),
+          ),
+          const SizedBox(height: 8),
+          _AdminMenuRow(
+            icon: TnIcons.stack(size: 19, color: TantinColors.majorelle),
+            label: "Réorganiser l'ordre",
+            sub: 'Changer l’ordre des tours à venir',
+            onPressed: () => Navigator.of(context).pop(_AdminAction.reorder),
+          ),
+          const SizedBox(height: 8),
+          _AdminMenuRow(
+            icon: TnIcons.users(size: 19, color: TantinColors.majorelle),
+            label: 'Remplacer un membre',
+            sub: 'Libérer une place et ré-inviter',
+            onPressed: () =>
+                Navigator.of(context).pop(_AdminAction.replaceMember),
+          ),
+          const SizedBox(height: 14),
+          _AdminMenuRow(
+            icon: TnIcons.trash(size: 19, color: TantinColors.danger),
+            label: 'Supprimer le daret',
+            sub: 'Action irréversible',
+            danger: true,
+            onPressed: () => Navigator.of(context).pop(_AdminAction.delete),
+          ),
+          const SizedBox(height: 8),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminMenuRow extends StatelessWidget {
+  const _AdminMenuRow({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    required this.onPressed,
+    this.danger = false,
+  });
+
+  final Widget icon;
+  final String label;
+  final String sub;
+  final VoidCallback onPressed;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onPressed: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: TantinColors.ivorySunken,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: danger
+                    ? TantinColors.danger.withValues(alpha: 0.1)
+                    : TantinColors.majorelleSoft,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: icon,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: danger ? TantinColors.danger : TantinColors.ink,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    sub,
+                    style: const TextStyle(
+                      color: TantinColors.inkMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!danger) TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EditDetailsSheet extends StatefulWidget {
+  const _EditDetailsSheet({required this.daret});
+
+  final Daret daret;
+
+  @override
+  State<_EditDetailsSheet> createState() => _EditDetailsSheetState();
+}
+
+class _EditDetailsSheetState extends State<_EditDetailsSheet> {
+  late final TextEditingController _nomController;
+  late final TextEditingController _coverController;
+  late String _accent;
+
+  @override
+  void initState() {
+    super.initState();
+    _nomController = TextEditingController(text: widget.daret.nom);
+    _coverController = TextEditingController(text: widget.daret.cover);
+    _accent = widget.daret.accent;
+  }
+
+  @override
+  void dispose() {
+    _nomController.dispose();
+    _coverController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Modifier les détails',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const _FieldLabel('Nom du daret'),
+          TextField(
+            controller: _nomController,
+            maxLength: 60,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: _fieldDecoration('Daret Famille'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 6),
+          const _FieldLabel('Couverture (emoji)'),
+          TextField(
+            controller: _coverController,
+            maxLength: 4,
+            decoration: _fieldDecoration('🏡'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 6),
+          const _FieldLabel('Couleur'),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final hex in _accentPresets)
+                _AccentSwatch(
+                  hex: hex,
+                  selected: hex == _accent,
+                  onTap: () => setState(() => _accent = hex),
+                ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          TnButton(
+            full: true,
+            disabled: !_canSave,
+            onPressed: _canSave ? _save : null,
+            child: const Text('Enregistrer'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+
+  bool get _canSave =>
+      _nomController.text.trim().isNotEmpty &&
+      _coverController.text.trim().isNotEmpty;
+
+  void _save() {
+    Navigator.of(context).pop(
+      _EditDetailsResult(
+        nom: _nomController.text.trim(),
+        cover: _coverController.text.trim(),
+        accent: _accent,
+      ),
+    );
+  }
+}
+
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: TantinColors.inkMuted,
+          fontSize: 12.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+InputDecoration _fieldDecoration(String hint) {
+  return InputDecoration(
+    hintText: hint,
+    counterText: '',
+    filled: true,
+    fillColor: TantinColors.ivorySunken,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(13),
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(13),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(13),
+      borderSide: const BorderSide(color: TantinColors.majorelle, width: 1.5),
+    ),
+  );
+}
+
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({
+    required this.hex,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String hex;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = hexToColor(hex);
+    return Pressable(
+      onPressed: onTap,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? TantinColors.ink : Colors.transparent,
+            width: 2.5,
+          ),
+        ),
+        child: selected
+            ? TnIcons.check(size: 18, color: Colors.white, strokeWidth: 2.6)
+            : null,
+      ),
+    );
+  }
+}
+
+class _ReorderSheet extends StatefulWidget {
+  const _ReorderSheet({
+    required this.upcoming,
+    required this.membersByUid,
+    required this.accent,
+  });
+
+  final List<DaretPeriod> upcoming;
+  final Map<String, DaretMember> membersByUid;
+  final Color accent;
+
+  @override
+  State<_ReorderSheet> createState() => _ReorderSheetState();
+}
+
+class _ReorderSheetState extends State<_ReorderSheet> {
+  late List<DaretPeriod> _order;
+
+  @override
+  void initState() {
+    super.initState();
+    _order = List<DaretPeriod>.of(widget.upcoming);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "Réorganiser l'ordre",
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Glissez pour changer qui reçoit chaque tour à venir.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 13.5,
+              height: 1.4,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(context).height * 0.42,
+            ),
+            child: ReorderableListView.builder(
+              shrinkWrap: true,
+              buildDefaultDragHandles: false,
+              itemCount: _order.length,
+              onReorder: _onReorder,
+              itemBuilder: (context, index) {
+                final period = _order[index];
+                final names = period.recipientUids
+                    .map((uid) => widget.membersByUid[uid]?.prenom ?? uid)
+                    .join(' & ');
+                return Padding(
+                  key: ValueKey(period.id),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ReorderableDragStartListener(
+                    index: index,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 13,
+                        vertical: 11,
+                      ),
+                      decoration: BoxDecoration(
+                        color: TantinColors.ivorySurface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: TantinColors.hairline),
+                        boxShadow: TantinShadows.sm,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: widget.accent.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(9),
+                            ),
+                            child: Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: widget.accent,
+                                fontFamily: 'Fraunces',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 11),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  names,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: TantinColors.ink,
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  TantinDates.dayMonth(period.scheduledDate),
+                                  style: const TextStyle(
+                                    color: TantinColors.inkMuted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TnIcons.stack(size: 18, color: TantinColors.inkMuted),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 14),
+          TnButton(
+            full: true,
+            onPressed: () => Navigator.of(context).pop(_order),
+            child: const Text("Enregistrer l'ordre"),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+
+  void _onReorder(int oldIndex, int newIndex) {
+    setState(() {
+      var target = newIndex;
+      if (target > oldIndex) target -= 1;
+      final moved = _order.removeAt(oldIndex);
+      _order.insert(target, moved);
+    });
+  }
+}
+
+class _ReplaceMemberPickSheet extends StatelessWidget {
+  const _ReplaceMemberPickSheet({required this.candidates});
+
+  final List<DaretMember> candidates;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Remplacer un membre',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Choisissez le membre à retirer. Seuls les tours à venir '
+            'peuvent être remplacés.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 13.5,
+              height: 1.4,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (final member in candidates) ...[
+            Pressable(
+              onPressed: () => Navigator.of(context).pop(member),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 13,
+                  vertical: 10,
+                ),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: TantinColors.ivorySurface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: TantinColors.hairline),
+                  boxShadow: TantinShadows.sm,
+                ),
+                child: Row(
+                  children: [
+                    Avatar(data: _avatarData(member), size: 38),
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Text(
+                        member.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: TantinColors.ink,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplaceConfirmSheet extends StatelessWidget {
+  const _ReplaceConfirmSheet({required this.member});
+
+  final DaretMember member;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.majorelleSoft,
+            child: TnIcons.users(size: 30, color: TantinColors.majorelle),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Remplacer ${member.prenom} ?',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'La place de ${member.prenom} sera libérée et un nouveau code '
+            "d'invitation sera généré à partager.",
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const _TrustNotice(
+            text:
+                "Tant'in ne déplace jamais d'argent. Les tours déjà reçus ne "
+                'sont pas modifiés.',
+          ),
+          const SizedBox(height: 18),
+          TnButton(
+            full: true,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Libérer la place'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplaceShareSheet extends StatelessWidget {
+  const _ReplaceShareSheet({required this.daret, required this.code});
+
+  final Daret daret;
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.success.withValues(alpha: 0.12),
+            child: TnIcons.checkCircle(size: 31, color: TantinColors.success),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Place libérée',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Partagez ce code pour qu’une nouvelle personne rejoigne '
+            '${daret.nom}.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: TantinColors.ivorySunken,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              code,
+              style: const TextStyle(
+                color: TantinColors.ink,
+                fontFamily: 'Fraunces',
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TnButton(
+            full: true,
+            icon: TnIcons.share(size: 18, color: Colors.white),
+            onPressed: () => unawaited(_shareCode(context)),
+            child: const Text('Partager le code'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _shareCode(BuildContext context) async {
+    final box = context.findRenderObject();
+    final origin = box is RenderBox
+        ? box.localToGlobal(Offset.zero) & box.size
+        : null;
+    await SharePlus.instance.share(
+      ShareParams(
+        text:
+            "Rejoins ${daret.nom} sur Tant'in avec le code $code "
+            "dans l'écran « Rejoindre un daret ».",
+        subject: "Invitation Tant'in",
+        sharePositionOrigin: origin,
+      ),
+    );
+  }
+}
+
+class _DeleteDaretSheet extends StatefulWidget {
+  const _DeleteDaretSheet({required this.daret});
+
+  final Daret daret;
+
+  @override
+  State<_DeleteDaretSheet> createState() => _DeleteDaretSheetState();
+}
+
+class _DeleteDaretSheetState extends State<_DeleteDaretSheet> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.danger.withValues(alpha: 0.1),
+            child: TnIcons.trash(size: 28, color: TantinColors.danger),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Supprimer ce daret ?',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Cette action est irréversible. Tout l’historique de '
+            '${widget.daret.nom} sera définitivement supprimé.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _FieldLabel('Tapez « ${widget.daret.nom} » pour confirmer'),
+          TextField(
+            controller: _controller,
+            decoration: _fieldDecoration(widget.daret.nom),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 16),
+          TnButton(
+            full: true,
+            variant: ButtonVariant.danger,
+            disabled: !_matches,
+            onPressed: _matches ? () => Navigator.of(context).pop(true) : null,
+            child: const Text('Supprimer définitivement'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+
+  bool get _matches =>
+      _controller.text.trim() == widget.daret.nom.trim() &&
+      widget.daret.nom.trim().isNotEmpty;
 }
 
 class _ConfirmPaySheet extends StatelessWidget {
@@ -1530,7 +2606,8 @@ class _HubHeader extends StatelessWidget {
     required this.accent,
     required this.isAdmin,
     required this.onBack,
-    required this.onHeaderAction,
+    required this.onManage,
+    required this.onShare,
   });
 
   final Daret daret;
@@ -1539,7 +2616,8 @@ class _HubHeader extends StatelessWidget {
   final Color accent;
   final bool isAdmin;
   final VoidCallback onBack;
-  final VoidCallback? onHeaderAction;
+  final VoidCallback? onManage;
+  final VoidCallback? onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -1592,7 +2670,8 @@ class _HubHeader extends StatelessWidget {
                       children: [
                         if (isAdmin) ...[
                           _HeaderIconButton(
-                            onPressed: onHeaderAction,
+                            key: const Key('hub-admin-gear'),
+                            onPressed: onManage,
                             child: TnIcons.settings(
                               size: 20,
                               color: Colors.white,
@@ -1601,7 +2680,7 @@ class _HubHeader extends StatelessWidget {
                           const SizedBox(width: 8),
                         ],
                         _HeaderIconButton(
-                          onPressed: onHeaderAction,
+                          onPressed: onShare,
                           child: TnIcons.share(size: 19, color: Colors.white),
                         ),
                       ],
@@ -1695,7 +2774,11 @@ class _HubHeader extends StatelessWidget {
 }
 
 class _HeaderIconButton extends StatelessWidget {
-  const _HeaderIconButton({required this.onPressed, required this.child});
+  const _HeaderIconButton({
+    required this.onPressed,
+    required this.child,
+    super.key,
+  });
 
   final VoidCallback? onPressed;
   final Widget child;
@@ -3071,6 +4154,10 @@ String _advanceKey(String daretId) {
 
 String _closeDaretKey(String daretId) {
   return 'close:$daretId';
+}
+
+String _adminKey(String op, String daretId) {
+  return '$op:$daretId';
 }
 
 String _periodMoment(Daret daret) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/features/activity/data/activity_providers.dart';
 import 'package:tantin_flutter/features/activity/domain/activity_event.dart';
 import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
@@ -304,6 +305,80 @@ void main() {
       find.textContaining("Tant'in ne déplace jamais d'argent"),
       findsOneWidget,
     );
+  });
+
+  testWidgets('admin manage sheet exposes the four operations', (tester) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Gérer le daret'), findsOneWidget);
+    expect(find.text('Modifier les détails'), findsOneWidget);
+    expect(find.text("Réorganiser l'ordre"), findsOneWidget);
+    expect(find.text('Remplacer un membre'), findsOneWidget);
+    expect(find.text('Supprimer le daret'), findsOneWidget);
+  });
+
+  testWidgets('delete guard stays locked until the daret name is typed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supprimer le daret'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Supprimer ce daret ?'), findsOneWidget);
+    final locked = tester.widget<TnButton>(
+      find.widgetWithText(TnButton, 'Supprimer définitivement'),
+    );
+    expect(locked.disabled, isTrue);
+
+    await tester.enterText(find.byType(TextField), 'Daret Famille');
+    await tester.pumpAndSettle();
+    final unlocked = tester.widget<TnButton>(
+      find.widgetWithText(TnButton, 'Supprimer définitivement'),
+    );
+    expect(unlocked.disabled, isFalse);
+  });
+
+  testWidgets('edit details sheet pre-fills the current daret', (tester) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Modifier les détails'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Couleur'), findsOneWidget);
+    expect(find.text('Enregistrer'), findsOneWidget);
+    expect(find.text('Daret Famille'), findsWidgets);
+  });
+
+  testWidgets('replace member lists only not-yet-served members', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remplacer un membre'));
+    await tester.pumpAndSettle();
+
+    // salma & reda hold an upcoming turn; karim already received in period 1.
+    expect(find.text('Salma Idrissi'), findsOneWidget);
+    expect(find.text('Reda Mansouri'), findsOneWidget);
+    expect(find.text('Karim Tazi'), findsNothing);
   });
 }
 

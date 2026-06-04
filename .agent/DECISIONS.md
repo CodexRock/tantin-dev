@@ -238,3 +238,45 @@
 - **Why the gate can't catch it:** deployed IAM lives in GCP, outside the repo — `verify.dart`, CI, the
   rules tests, and the jest suite never touch it. Only the first real on-device invocation surfaces it.
   S5/S6 agents: after deploying any new callable, verify its invoker binding on first device call.
+
+## D028: S5 Part-4 admin ops are Function-only; structure edits touch only upcoming periods (S5)
+- **Decision:** All admin management beyond editing a *draft* root goes through new admin callables —
+  no client writes and no loosened `firestore.rules` (the active-daret root + period/member/contribution
+  docs stay Function-owned, proven by a new rules deny test "admin has no client path for active-daret
+  structural ops"). New callables (all `requireAdmin`, transactional, emit activity):
+  - `reorderPeriods(daretId, periods[])` — réorganiser l'ordre **and** adjust group shares. It rewrites
+    only **upcoming** periods (index > currentPeriode, status `upcoming`) and re-validates the *whole*
+    plan with `startDaret`'s `validatePeriodPlans` (every period filled, each member once, shares sum
+    100, positive). This single callable subsumes the prototype's separate "adjust amounts": the
+    per-member base `montant` is immutable once a daret is active (no retroactive money math); only the
+    forward recipient/share assignment is editable. Closed/current periods are rejected.
+  - `replaceMember(daretId, fromUid, toUid?)` — only a member whose turn is still **upcoming** and who
+    has not `confirme`-paid the live tour. Two modes: **direct** (`toUid` = existing account, takes over
+    the live tour's contribution) and **placeholder/re-invite** (default, chosen for device UX — opens a
+    vacant `pending_<code>` seat, reserves a fresh invite code, returns it to share). Past tours are left
+    intact (history); a re-invited seat owes nothing for the live tour (its `totalCount` is decremented).
+  - `editDaretDetails(daretId, {nom?, cover?, accent?})` — cosmetic only, any non-terminated daret.
+  - `deleteDaret(daretId)` — `requireAdmin`, then deletes the invite doc + `db.recursiveDelete(daretRef)`
+    (members/periods/contributions/activity). Per-user `notifications/*` referencing the daret are left
+    (harmless, not queryable by daretId); the UI requires a type-the-exact-name confirmation guard.
+  - `joinDaret` extended to accept **active** darets *only* when filling a vacant placeholder seat (the
+    re-invite completion path); such joiners are added `approved` and the daret can never grow past its
+    period count.
+- **Rationale:** Mirrors how `startDaret` already expands a draft server-side; keeps the two-sided trust
+  invariants unbreakable from the client (CRITICAL section of the S5 brief) while making every prototype
+  admin row (`hub2.jsx` `Gerer`) actually work end-to-end.
+- **Deferred (documented, not silently dropped):** "Mettre en pause" — it needs a new lifecycle status
+  absent from the data model/rules/state machine and is outside the S5 T10 task list; the row is omitted
+  rather than shipped half-built (revisit in S6 if product wants pause).
+- **D027 follow-up:** the four new callables (`reorderperiods`, `replacemember`, `editdaretdetails`,
+  `deletedaret`) are device-invoked → each needs the `allUsers` `roles/run.invoker` binding after deploy.
+
+## D029: S5 Part-4 goldens — interaction widget tests + device walkthrough, no new alchemist golden (S5)
+- **Decision:** The admin sheets are private, modal/bottom-sheet widgets driven by live providers. Rather
+  than expose internals or fight modal pumping in alchemist, they are covered by interaction-driven
+  widget tests (`daret_hub_screen_test.dart`: open the manage sheet, assert the four ops; delete
+  type-to-confirm guard locks/unlocks; edit-details pre-fill; replace lists only not-yet-served members)
+  plus the on-device walkthrough — the same "device-walkthrough coverage" choice the S5 brief offered and
+  consistent with how Parts 1–3 covered the provider-heavy hub (widget smoke, no hub golden).
+- **Rationale:** A structural golden of a stubbed sheet would verify layout of a fixture, not the real
+  provider-fed behaviour; the interaction tests verify the actual admin gating/guards, which is the risk.

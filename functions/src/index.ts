@@ -123,12 +123,43 @@ const sendNudgeInput = z
   })
   .strict();
 const seedDevInput = z.object({}).strict();
+const periodAssignmentSchema = z
+  .object({
+    index: z.number().int().min(1).max(99),
+    recipientUids: z.array(uidSchema).min(1).max(8),
+    shares: z.record(z.string(), z.number().int()),
+  })
+  .strict();
+const reorderPeriodsInput = z
+  .object({
+    daretId: daretIdSchema,
+    periods: z.array(periodAssignmentSchema).min(1).max(99),
+  })
+  .strict();
+const replaceMemberInput = z
+  .object({daretId: daretIdSchema, fromUid: uidSchema, toUid: uidSchema.optional()})
+  .strict();
+const editDaretDetailsInput = z
+  .object({
+    daretId: daretIdSchema,
+    nom: z.string().trim().min(1).max(60).optional(),
+    cover: z.string().trim().min(1).max(40).optional(),
+    accent: z
+      .string()
+      .trim()
+      .regex(/^#[0-9A-Fa-f]{6}$/)
+      .optional(),
+  })
+  .strict();
 
 type DaretIdInput = z.infer<typeof daretIdInput>;
 type InviteInput = z.infer<typeof inviteInput>;
 type ClosePeriodInput = z.infer<typeof closePeriodInput>;
 type SendNudgeInput = z.infer<typeof sendNudgeInput>;
 type SeedDevInput = z.infer<typeof seedDevInput>;
+type ReorderPeriodsInput = z.infer<typeof reorderPeriodsInput>;
+type ReplaceMemberInput = z.infer<typeof replaceMemberInput>;
+type EditDaretDetailsInput = z.infer<typeof editDaretDetailsInput>;
 
 function defaultDeps(): HandlerDeps {
   return {
@@ -180,6 +211,10 @@ export const advancePeriod = makeCallable(daretIdInput, advancePeriodHandler);
 export const closePeriod = makeCallable(closePeriodInput, closePeriodHandler);
 export const closeDaret = makeCallable(daretIdInput, closeDaretHandler);
 export const sendNudge = makeCallable(sendNudgeInput, sendNudgeHandler);
+export const reorderPeriods = makeCallable(reorderPeriodsInput, reorderPeriodsHandler);
+export const replaceMember = makeCallable(replaceMemberInput, replaceMemberHandler);
+export const editDaretDetails = makeCallable(editDaretDetailsInput, editDaretDetailsHandler);
+export const deleteDaret = makeCallable(daretIdInput, deleteDaretHandler);
 export const seedDev = makeCallable(seedDevInput, seedDevHandler);
 
 export const onContributionWritten = onDocumentWritten(
@@ -426,7 +461,7 @@ async function joinDaretHandler(
     const daretSnapshot = await transaction.get(daretRef);
     const daret = requireExistingData(daretSnapshot, 'daret');
     const status = requireStatus(daret);
-    if (status !== 'brouillon' && status !== 'attente') {
+    if (status !== 'brouillon' && status !== 'attente' && status !== 'actif') {
       fail('failed-precondition', 'This invite is no longer joinable.');
     }
 
@@ -436,6 +471,11 @@ async function joinDaretHandler(
     }
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
     const placeholderUid = memberUids.find(isPendingMemberUid);
+    // An active daret only accepts joins that fill a vacant (re-invited) seat;
+    // it can never grow past its period count.
+    if (status === 'actif' && placeholderUid === undefined) {
+      fail('failed-precondition', 'This daret is no longer joinable.');
+    }
     if (memberUids.length >= periodesCount && placeholderUid === undefined) {
       fail('failed-precondition', 'This daret is full.');
     }
@@ -471,7 +511,11 @@ async function joinDaretHandler(
         updatedAt: now,
       });
     }
-    transaction.set(memberRef, memberDocument(profile, 'member', 'pending', now), {merge: false});
+    transaction.set(
+      memberRef,
+      memberDocument(profile, 'member', status === 'actif' ? 'approved' : 'pending', now),
+      {merge: false},
+    );
     transaction.set(
       daretRef.collection('activity').doc(`member-${context.uid}`),
       activityDocument({
@@ -778,6 +822,322 @@ async function sendNudgeHandler(
     });
     return {sent: true};
   });
+}
+
+async function reorderPeriodsHandler(
+  context: HandlerContext<ReorderPeriodsInput>,
+  deps: HandlerDeps,
+): Promise<{updated: number}> {
+  const {db} = deps;
+  const now = deps.now();
+  const daretRef = db.collection('darets').doc(context.data.daretId);
+
+  return db.runTransaction(async (transaction) => {
+    const daretSnapshot = await transaction.get(daretRef);
+    const daret = requireExistingData(daretSnapshot, 'daret');
+    requireAdmin(daret, context.uid);
+    if (requireStatus(daret) !== 'actif') {
+      fail('failed-precondition', 'Only active darets can be reorganised.');
+    }
+    const memberUids = requireStringArray(daret, 'memberUids');
+    const periodesCount = requirePositiveInteger(daret, 'periodesCount');
+    const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+
+    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    const existingPlans = periodsSnapshot.docs.map(readPeriodPlan);
+
+    const updates = new Map<number, {recipientUids: string[]; shares: Record<string, number>}>();
+    for (const assignment of context.data.periods) {
+      if (assignment.index <= currentPeriode) {
+        fail('failed-precondition', 'Only upcoming periods can be reorganised.');
+      }
+      if (updates.has(assignment.index)) {
+        fail('failed-precondition', 'Each period can be reassigned only once.');
+      }
+      if (new Set(assignment.recipientUids).size !== assignment.recipientUids.length) {
+        fail('failed-precondition', 'A period cannot list the same recipient twice.');
+      }
+      updates.set(assignment.index, {
+        recipientUids: assignment.recipientUids,
+        shares: cleanShares(assignment.recipientUids, assignment.shares),
+      });
+    }
+
+    const composed = existingPlans.map((plan) => {
+      const update = updates.get(plan.index);
+      if (update === undefined) {
+        return plan;
+      }
+      if (plan.status !== 'upcoming') {
+        fail('failed-precondition', 'Only upcoming periods can be reorganised.');
+      }
+      return {...plan, recipientUids: update.recipientUids, shares: update.shares};
+    });
+    validatePeriodPlans(composed, memberUids, periodesCount);
+
+    let updated = 0;
+    for (const plan of composed) {
+      if (!updates.has(plan.index)) {
+        continue;
+      }
+      transaction.update(daretRef.collection('periods').doc(plan.id), {
+        recipientUids: plan.recipientUids,
+        shares: plan.shares,
+      });
+      updated += 1;
+    }
+    if (updated === 0) {
+      fail('failed-precondition', 'No upcoming period was changed.');
+    }
+    transaction.set(
+      daretRef.collection('activity').doc(`reorder-${dateKey(now)}-${currentPeriode}`),
+      activityDocument({
+        type: 'tour',
+        actorUid: context.uid,
+        text: `L'ordre des tours de ${requireString(daret, 'nom')} a été mis à jour`,
+        createdAt: now,
+      }),
+      {merge: true},
+    );
+    transaction.update(daretRef, {updatedAt: now});
+    logger.info('reorderPeriods completed', {
+      daretId: context.data.daretId,
+      uid: context.uid,
+      updated,
+    });
+    return {updated};
+  });
+}
+
+async function replaceMemberHandler(
+  context: HandlerContext<ReplaceMemberInput>,
+  deps: HandlerDeps,
+): Promise<{replaced: boolean; code?: string; placeholderUid?: string}> {
+  const {db} = deps;
+  const now = deps.now();
+  const {fromUid, toUid} = context.data;
+  if (toUid !== undefined && fromUid === toUid) {
+    fail('invalid-argument', 'The new member must differ from the old one.');
+  }
+  const daretRef = db.collection('darets').doc(context.data.daretId);
+
+  return db.runTransaction(async (transaction) => {
+    const daretSnapshot = await transaction.get(daretRef);
+    const daret = requireExistingData(daretSnapshot, 'daret');
+    requireAdmin(daret, context.uid);
+    if (requireStatus(daret) !== 'actif') {
+      fail('failed-precondition', 'Only active darets can replace a member.');
+    }
+    const memberUids = requireStringArray(daret, 'memberUids');
+    const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+    if (!memberUids.includes(fromUid)) {
+      fail('failed-precondition', 'The member to replace is not in this daret.');
+    }
+    if (fromUid === requireString(daret, 'adminUid')) {
+      fail('failed-precondition', 'The admin cannot be replaced.');
+    }
+    if (toUid !== undefined && memberUids.includes(toUid)) {
+      fail('failed-precondition', 'The new member already belongs to this daret.');
+    }
+
+    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    const plans = periodsSnapshot.docs.map(readPeriodPlan);
+    for (const plan of plans) {
+      const involvesFrom =
+        plan.recipientUids.includes(fromUid) || plan.shares[fromUid] !== undefined;
+      if (involvesFrom && plan.status !== 'upcoming') {
+        fail('failed-precondition', 'A member who already received a turn cannot be replaced.');
+      }
+    }
+
+    const currentPeriodRef = daretRef.collection('periods').doc(periodId(currentPeriode));
+    const fromContributionRef = currentPeriodRef.collection('contributions').doc(fromUid);
+    const fromContributionSnapshot = await transaction.get(fromContributionRef);
+    const fromMemberSnapshot = await transaction.get(daretRef.collection('members').doc(fromUid));
+
+    // All reads must precede writes: resolve the replacement identity now.
+    // Direct mode replaces with an existing account; placeholder mode opens a
+    // vacant seat and reserves a fresh invite code for whoever fills it.
+    let reservedCode: string | undefined;
+    let profile: PersonProfile;
+    if (toUid === undefined) {
+      reservedCode = await reserveInviteCode(transaction, deps);
+      const placeholderUid = `pending_${reservedCode.replace('TANTIN-', '').toLowerCase()}`;
+      if (memberUids.includes(placeholderUid)) {
+        fail('internal', 'Could not allocate a replacement seat.');
+      }
+      profile = placeholderProfile(placeholderUid);
+    } else {
+      const profileSnapshot = await transaction.get(db.collection('users').doc(toUid));
+      profile = readRequiredProfile(toUid, profileSnapshot);
+    }
+    const newUid = profile.uid;
+
+    const fromContribution = fromContributionSnapshot.exists
+      ? requireExistingData(fromContributionSnapshot, 'contribution')
+      : undefined;
+    if (fromContribution !== undefined && optionalString(fromContribution, 'state') === 'confirme') {
+      fail('failed-precondition', 'A member who already paid this turn cannot be replaced.');
+    }
+    const fromMember = requireExistingData(fromMemberSnapshot, 'member');
+
+    const nextMemberUids = memberUids.map((uid) => (uid === fromUid ? newUid : uid));
+
+    // Swap the replacement into every upcoming period assignment.
+    for (const plan of plans) {
+      if (!plan.recipientUids.includes(fromUid) && plan.shares[fromUid] === undefined) {
+        continue;
+      }
+      const recipientUids = plan.recipientUids.map((uid) => (uid === fromUid ? newUid : uid));
+      const shares: Record<string, number> = {...plan.shares};
+      if (shares[fromUid] !== undefined) {
+        shares[newUid] = shares[fromUid] ?? 0;
+        delete shares[fromUid];
+      }
+      transaction.update(daretRef.collection('periods').doc(plan.id), {recipientUids, shares});
+    }
+
+    // Reassign the live tour's contribution. A real account takes it over; a
+    // vacant seat owes nothing until someone joins, so shrink the live total.
+    if (fromContribution !== undefined) {
+      transaction.delete(fromContributionRef);
+      if (toUid !== undefined) {
+        transaction.set(
+          currentPeriodRef.collection('contributions').doc(newUid),
+          contributionDocument(newUid, 'apayer', positiveInteger(fromContribution.amount, 'amount')),
+          {merge: false},
+        );
+      } else if (optionalString(fromContribution, 'state') !== 'recipient') {
+        transaction.update(currentPeriodRef, {totalCount: FieldValue.increment(-1)});
+      }
+    }
+
+    transaction.delete(daretRef.collection('members').doc(fromUid));
+    transaction.set(
+      daretRef.collection('members').doc(newUid),
+      memberDocument(profile, 'member', toUid === undefined ? 'pending' : 'approved', now),
+      {merge: false},
+    );
+    transaction.update(daretRef, {
+      memberUids: nextMemberUids,
+      updatedAt: now,
+      ...(reservedCode !== undefined ? {inviteCode: reservedCode} : {}),
+    });
+    if (reservedCode !== undefined) {
+      transaction.set(db.collection('invites').doc(reservedCode), {
+        daretId: context.data.daretId,
+        createdByUid: context.uid,
+        active: true,
+        expiresAt: Timestamp.fromMillis(now.toMillis() + INVITE_TTL_MS),
+        createdAt: now,
+      });
+    }
+    transaction.set(
+      daretRef.collection('activity').doc(`replace-${fromUid}-${newUid}`),
+      activityDocument({
+        type: 'membre',
+        actorUid: context.uid,
+        text: `${profile.prenom} remplace ${requireString(fromMember, 'prenom')} dans ${requireString(daret, 'nom')}`,
+        createdAt: now,
+      }),
+      {merge: true},
+    );
+    logger.info('replaceMember completed', {
+      daretId: context.data.daretId,
+      uid: context.uid,
+      fromUid,
+      toUid: newUid,
+      mode: toUid === undefined ? 'placeholder' : 'direct',
+    });
+    return toUid === undefined
+      ? {replaced: true, code: reservedCode, placeholderUid: newUid}
+      : {replaced: true};
+  });
+}
+
+function placeholderProfile(uid: string): PersonProfile {
+  return {
+    uid,
+    prenom: 'Invitation',
+    nom: '',
+    name: 'Invitation',
+    initials: 'IN',
+    phone: '',
+    avatarPalette: ['#F5A623', '#FBEFD6'],
+  };
+}
+
+async function editDaretDetailsHandler(
+  context: HandlerContext<EditDaretDetailsInput>,
+  deps: HandlerDeps,
+): Promise<{updated: boolean}> {
+  const {db} = deps;
+  const now = deps.now();
+  const daretRef = db.collection('darets').doc(context.data.daretId);
+  const changes: FirestoreData = {};
+  if (context.data.nom !== undefined) {
+    changes.nom = context.data.nom;
+  }
+  if (context.data.cover !== undefined) {
+    changes.cover = context.data.cover;
+  }
+  if (context.data.accent !== undefined) {
+    changes.accent = context.data.accent;
+  }
+  if (Object.keys(changes).length === 0) {
+    fail('invalid-argument', 'No detail was provided to update.');
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const daretSnapshot = await transaction.get(daretRef);
+    const daret = requireExistingData(daretSnapshot, 'daret');
+    requireAdmin(daret, context.uid);
+    if (requireStatus(daret) === 'termine') {
+      fail('failed-precondition', 'Closed darets cannot be edited.');
+    }
+    transaction.update(daretRef, {...changes, updatedAt: now});
+    logger.info('editDaretDetails completed', {
+      daretId: context.data.daretId,
+      uid: context.uid,
+      fields: Object.keys(changes),
+    });
+    return {updated: true};
+  });
+}
+
+async function deleteDaretHandler(
+  context: HandlerContext<DaretIdInput>,
+  deps: HandlerDeps,
+): Promise<{deleted: boolean}> {
+  const {db} = deps;
+  const daretRef = db.collection('darets').doc(context.data.daretId);
+  const daretSnapshot = await daretRef.get();
+  const daret = requireExistingData(daretSnapshot, 'daret');
+  requireAdmin(daret, context.uid);
+
+  const inviteCode = optionalString(daret, 'inviteCode');
+  if (inviteCode !== undefined) {
+    await db.collection('invites').doc(inviteCode).delete();
+  }
+  // Recursively removes members, periods, contributions and activity.
+  await db.recursiveDelete(daretRef);
+  logger.info('deleteDaret completed', {daretId: context.data.daretId, uid: context.uid});
+  return {deleted: true};
+}
+
+function cleanShares(
+  recipientUids: string[],
+  shares: Record<string, number>,
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const uid of recipientUids) {
+    const value = shares[uid];
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+      fail('failed-precondition', 'Every recipient needs a positive share.');
+    }
+    result[uid] = value;
+  }
+  return result;
 }
 
 async function onContributionWrittenHandler(
@@ -2110,6 +2470,10 @@ export const __testables = {
   closePeriodHandler,
   closeDaretHandler,
   sendNudgeHandler,
+  reorderPeriodsHandler,
+  replaceMemberHandler,
+  editDaretDetailsHandler,
+  deleteDaretHandler,
   onContributionWrittenHandler,
   onMemberCreatedHandler,
   dailyRemindersHandler,
@@ -2122,5 +2486,8 @@ export const __testables = {
     closePeriodInput,
     sendNudgeInput,
     seedDevInput,
+    reorderPeriodsInput,
+    replaceMemberInput,
+    editDaretDetailsInput,
   },
 };
