@@ -280,3 +280,25 @@
   consistent with how Parts 1–3 covered the provider-heavy hub (widget smoke, no hub golden).
 - **Rationale:** A structural golden of a stubbed sheet would verify layout of a fixture, not the real
   provider-fed behaviour; the interaction tests verify the actual admin gating/guards, which is the risk.
+
+## D030: reorder/replace are locked once the first payment is recorded (S5, device feedback)
+- **Decision (supersedes the availability rule in D028):** `reorderPeriods` and `replaceMember` are only
+  permitted while the daret is **active, still on its first tour (`currentPeriode == 1`), and no payment
+  has been recorded** (no contribution in `attente`/`confirme`). Once anyone declares/confirms a payment,
+  the order and membership are final — changing them afterwards would let someone who has already paid
+  lose their turn. Enforced server-side by `requireNotStarted(currentPeriode)` + `assertNoPaymentRecorded`
+  in both callables, and mirrored in the hub: the "Réorganiser/Remplacer" rows only render when the
+  client computes the same `arrangeable` predicate. Edit-details and delete remain available in any state.
+  Mechanics are unchanged (reorder still rewrites the upcoming tours 2..N; the first beneficiary set at
+  creation stays fixed — extending reorder to tour 1 is deferred). This also resolves the device bug where
+  reordering a daret that had already advanced produced `failed-precondition: period recipient must be
+  member` — that broken state is now unreachable because the rows are hidden/blocked.
+- **Rationale:** Matches the owner's trust model (the arrangement is a promise that locks the moment money
+  starts moving) and removes a whole class of mid-cycle invalid-assignment failures.
+- **Also (icons):** added a real `TnIcons.minus` (the create-wizard period stepper "–" was using the ✕
+  `close` glyph) and switched the hub header manage button from `TnIcons.settings` (renders as a
+  sun/brightness glyph) to `TnIcons.edit` (pencil).
+- **Deferred to a follow-up (owner-requested, additive — not blocking S5 admin):** admin approving other
+  members (approve-for-others); replacing into a freed seat by picking an existing contact (create
+  step-3-style) instead of only re-invite-by-code. Re-invited members who join via the code are added
+  **`approved`** (no extra approval step) — the active-daret join path sets approvalStatus approved.

@@ -118,6 +118,17 @@ abstract class TnIcons {
     content: '<path d="M12 5v14M5 12h14" />',
   );
 
+  static Widget minus({
+    double size = 24,
+    Color? color,
+    double strokeWidth = 1.7,
+  }) => _SvgIcon(
+    size: size,
+    color: color,
+    strokeWidth: strokeWidth,
+    content: '<path d="M5 12h14" />',
+  );
+
   static Widget chevR({
     double size = 24,
     Color? color,

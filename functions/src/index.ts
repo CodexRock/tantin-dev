@@ -842,8 +842,15 @@ async function reorderPeriodsHandler(
     const memberUids = requireStringArray(daret, 'memberUids');
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
     const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+    // The order may only be changed before the daret has advanced and before
+    // any payment is recorded — once someone has paid the arrangement is final.
+    requireNotStarted(currentPeriode);
 
     const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    const currentContributions = await transaction.get(
+      daretRef.collection('periods').doc(periodId(currentPeriode)).collection('contributions'),
+    );
+    assertNoPaymentRecorded(currentContributions.docs.map((doc) => doc.data()));
     const existingPlans = periodsSnapshot.docs.map(readPeriodPlan);
 
     const updates = new Map<number, {recipientUids: string[]; shares: Record<string, number>}>();
@@ -930,6 +937,10 @@ async function replaceMemberHandler(
     }
     const memberUids = requireStringArray(daret, 'memberUids');
     const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+    // Members may only be swapped before the daret has advanced and before any
+    // payment is recorded — afterwards the membership is locked so nobody who
+    // has already paid can lose their turn.
+    requireNotStarted(currentPeriode);
     if (!memberUids.includes(fromUid)) {
       fail('failed-precondition', 'The member to replace is not in this daret.');
     }
@@ -951,6 +962,8 @@ async function replaceMemberHandler(
     }
 
     const currentPeriodRef = daretRef.collection('periods').doc(periodId(currentPeriode));
+    const currentContributions = await transaction.get(currentPeriodRef.collection('contributions'));
+    assertNoPaymentRecorded(currentContributions.docs.map((doc) => doc.data()));
     const fromContributionRef = currentPeriodRef.collection('contributions').doc(fromUid);
     const fromContributionSnapshot = await transaction.get(fromContributionRef);
     const fromMemberSnapshot = await transaction.get(daretRef.collection('members').doc(fromUid));
@@ -1123,6 +1136,21 @@ async function deleteDaretHandler(
   await db.recursiveDelete(daretRef);
   logger.info('deleteDaret completed', {daretId: context.data.daretId, uid: context.uid});
   return {deleted: true};
+}
+
+function requireNotStarted(currentPeriode: number): void {
+  if (currentPeriode !== 1) {
+    fail('failed-precondition', 'Le daret a déjà avancé : la disposition est verrouillée.');
+  }
+}
+
+function assertNoPaymentRecorded(contributions: FirestoreData[]): void {
+  for (const contribution of contributions) {
+    const state = optionalString(contribution, 'state');
+    if (state === 'attente' || state === 'confirme') {
+      fail('failed-precondition', 'Un paiement a déjà été enregistré : la disposition est verrouillée.');
+    }
+  }
 }
 
 function cleanShares(

@@ -1737,7 +1737,7 @@ class _Stepper extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
           children: [
-            _SquareButton(icon: TnIcons.close(size: 18), onPressed: onMinus),
+            _SquareButton(icon: TnIcons.minus(size: 18), onPressed: onMinus),
             Expanded(
               child: Column(
                 children: [

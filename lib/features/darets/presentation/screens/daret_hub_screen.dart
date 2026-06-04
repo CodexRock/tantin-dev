@@ -97,6 +97,17 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final membersByUid = {for (final member in members) member.uid: member};
     final accent = hexToColor(daret.accent);
     final isAdmin = uid != null && uid == daret.adminUid;
+    // The order/members can only be rearranged before the daret advances past
+    // its first tour AND before any payment is recorded — see requireNotStarted
+    // / assertNoPaymentRecorded on the backend. After that it is locked.
+    final arrangeable =
+        daret.statut == DaretStatus.actif &&
+        daret.currentPeriode == 1 &&
+        contributions.every(
+          (contribution) =>
+              contribution.state != ContributionState.attente &&
+              contribution.state != ContributionState.confirme,
+        );
     final currentMember = uid == null ? null : membersByUid[uid];
     final currentShare = uid == null ? 0 : currentPeriod?.shares[uid] ?? 0;
     final payoutAmount = currentPeriod == null
@@ -169,6 +180,7 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                       periods: periods,
                       membersByUid: membersByUid,
                       accent: accent,
+                      arrangeable: arrangeable,
                     ),
                   )
                 : null,
@@ -409,8 +421,13 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     required List<DaretPeriod> periods,
     required Map<String, DaretMember> membersByUid,
     required Color accent,
+    required bool arrangeable,
   }) async {
-    final action = await _showAdminMenuSheet(context, daret: daret);
+    final action = await _showAdminMenuSheet(
+      context,
+      daret: daret,
+      arrangeable: arrangeable,
+    );
     if (action == null || !mounted) return;
     switch (action) {
       case _AdminAction.editDetails:
@@ -706,12 +723,13 @@ const List<String> _accentPresets = [
 Future<_AdminAction?> _showAdminMenuSheet(
   BuildContext context, {
   required Daret daret,
+  required bool arrangeable,
 }) {
   return showModalBottomSheet<_AdminAction>(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (_) => _AdminMenuSheet(daret: daret),
+    builder: (_) => _AdminMenuSheet(daret: daret, arrangeable: arrangeable),
   );
 }
 
@@ -795,9 +813,10 @@ Future<bool?> _showDeleteDaretSheet(
 }
 
 class _AdminMenuSheet extends StatelessWidget {
-  const _AdminMenuSheet({required this.daret});
+  const _AdminMenuSheet({required this.daret, required this.arrangeable});
 
   final Daret daret;
+  final bool arrangeable;
 
   @override
   Widget build(BuildContext context) {
@@ -835,10 +854,11 @@ class _AdminMenuSheet extends StatelessWidget {
             onPressed: () =>
                 Navigator.of(context).pop(_AdminAction.editDetails),
           ),
-          // Réorganiser / remplacer only apply to an active daret (they rewrite
-          // upcoming tours server-side); hide them otherwise so the admin never
-          // hits a "Only active darets…" rejection.
-          if (daret.statut == DaretStatus.actif) ...[
+          // Réorganiser / remplacer are only possible before the daret advances
+          // and before the first payment is recorded (server enforces the same
+          // via requireNotStarted / assertNoPaymentRecorded); hide them once the
+          // arrangement is locked so the admin never hits a rejection.
+          if (arrangeable) ...[
             const SizedBox(height: 8),
             _AdminMenuRow(
               icon: TnIcons.stack(size: 19, color: TantinColors.majorelle),
@@ -2677,7 +2697,7 @@ class _HubHeader extends StatelessWidget {
                           _HeaderIconButton(
                             key: const Key('hub-admin-gear'),
                             onPressed: onManage,
-                            child: TnIcons.settings(
+                            child: TnIcons.edit(
                               size: 20,
                               color: Colors.white,
                             ),

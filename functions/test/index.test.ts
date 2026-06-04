@@ -572,7 +572,7 @@ describe('admin management (Part 4)', () => {
       .collection('darets')
       .doc('d1')
       .collection('periods')
-      .doc('02')
+      .doc('01')
       .collection('contributions')
       .doc('newcomer')
       .get();
@@ -581,7 +581,7 @@ describe('admin management (Part 4)', () => {
       .collection('darets')
       .doc('d1')
       .collection('periods')
-      .doc('02')
+      .doc('01')
       .collection('contributions')
       .doc('recipient')
       .get();
@@ -604,7 +604,7 @@ describe('admin management (Part 4)', () => {
     expect(seat.data()).toMatchObject({uid: 'pending_7k2p', approvalStatus: 'pending', prenom: 'Invitation'});
     const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
     expect(p3.data()).toMatchObject({recipientUids: ['pending_7k2p'], shares: {pending_7k2p: 100}});
-    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
     expect(liveTour.data()?.totalCount).toBe(1);
     const invite = await db.collection('invites').doc('TANTIN-7K2P').get();
     expect(invite.data()).toMatchObject({daretId: 'd1', active: true});
@@ -687,6 +687,37 @@ describe('admin management (Part 4)', () => {
     expect(contributions.size).toBe(0);
     const invite = await db.collection('invites').doc('TANTIN-DEL1').get();
     expect(invite.exists).toBe(false);
+  });
+
+  test('reorderPeriods and replaceMember lock once a payment is recorded', async () => {
+    await seedReorderDaret('d1');
+    // payer declares their first-tour payment — the arrangement is now final.
+    await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .doc('payer')
+      .update({state: 'attente'});
+
+    await expectCodeAsync(
+      __testables.reorderPeriodsHandler(
+        ctx('admin', {
+          daretId: 'd1',
+          periods: [
+            {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
+            {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+          ] as PeriodAssignment[],
+        }),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps()),
+      'failed-precondition',
+    );
   });
 });
 
@@ -1096,16 +1127,18 @@ async function seedReorderDaret(daretId: string): Promise<void> {
 }
 
 async function seedReplaceDaret(daretId: string): Promise<void> {
+  // Arrangeable: still on the first tour, no payment recorded yet. payer is the
+  // current (period 1) recipient; admin/recipient hold upcoming turns.
   await seedUser('admin', 'Admin');
   await seedUser('payer', 'Payer');
   await seedUser('recipient', 'Recipient');
   await seedUser('newcomer', 'Newcomer');
   await seedDraftDaret(daretId, ['admin', 'payer', 'recipient'], 'admin', 3, 'actif', 'approved');
-  await db.collection('darets').doc(daretId).update({currentPeriode: 2});
-  await seedPeriodDoc(daretId, 1, 'payer', 'closed');
-  await seedPeriodDoc(daretId, 2, 'admin', 'current');
+  await db.collection('darets').doc(daretId).update({currentPeriode: 1});
+  await seedPeriodDoc(daretId, 1, 'payer', 'current');
+  await seedPeriodDoc(daretId, 2, 'admin', 'upcoming');
   await seedPeriodDoc(daretId, 3, 'recipient', 'upcoming');
-  await seedCurrentContributions(daretId, 2, 'admin', ['payer', 'recipient']);
+  await seedCurrentContributions(daretId, 1, 'payer', ['admin', 'recipient']);
 }
 
 function expectCode(callback: () => unknown, code: string): void {

@@ -200,6 +200,26 @@ const _closingContributions = <Contribution>[
   ),
 ];
 
+// Period-1, no-payment recorded → reorder/replace are still available.
+const _arrangeableContributions = <Contribution>[
+  Contribution(
+    payerUid: 'karim',
+    state: ContributionState.recipient,
+    amount: 0,
+  ),
+  Contribution(
+    payerUid: 'admin',
+    state: ContributionState.apayer,
+    amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'salma',
+    state: ContributionState.apayer,
+    amount: 1500,
+  ),
+  Contribution(payerUid: 'reda', state: ContributionState.apayer, amount: 1500),
+];
+
 final _activity = <ActivityEvent>[
   ActivityEvent(
     id: 'a1',
@@ -308,7 +328,12 @@ void main() {
   });
 
   testWidgets('admin manage sheet exposes the four operations', (tester) async {
-    await tester.pumpWidget(_host());
+    await tester.pumpWidget(
+      _host(
+        daret: _daret.copyWith(currentPeriode: 1),
+        contributions: _arrangeableContributions,
+      ),
+    );
     await tester.pumpAndSettle();
     await _dismissPayoutTakeover(tester);
 
@@ -320,6 +345,23 @@ void main() {
     expect(find.text("Réorganiser l'ordre"), findsOneWidget);
     expect(find.text('Remplacer un membre'), findsOneWidget);
     expect(find.text('Supprimer le daret'), findsOneWidget);
+  });
+
+  testWidgets('manage sheet hides reorder/replace once payments start', (
+    tester,
+  ) async {
+    // Default daret is on period 2 → arrangement is locked.
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Modifier les détails'), findsOneWidget);
+    expect(find.text('Supprimer le daret'), findsOneWidget);
+    expect(find.text("Réorganiser l'ordre"), findsNothing);
+    expect(find.text('Remplacer un membre'), findsNothing);
   });
 
   testWidgets('delete guard stays locked until the daret name is typed', (
@@ -366,7 +408,12 @@ void main() {
   testWidgets('replace member lists only not-yet-served members', (
     tester,
   ) async {
-    await tester.pumpWidget(_host());
+    await tester.pumpWidget(
+      _host(
+        daret: _daret.copyWith(currentPeriode: 1),
+        contributions: _arrangeableContributions,
+      ),
+    );
     await tester.pumpAndSettle();
     await _dismissPayoutTakeover(tester);
 
