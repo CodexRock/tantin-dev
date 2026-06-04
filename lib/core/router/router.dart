@@ -8,7 +8,7 @@ import 'package:tantin_flutter/features/activity/presentation/screens/activite_s
 import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
 import 'package:tantin_flutter/features/calendar/presentation/screens/calendrier_screen.dart';
 import 'package:tantin_flutter/features/create_daret/presentation/screens/create_daret_screen.dart';
-import 'package:tantin_flutter/features/darets/presentation/screens/daret_hub_stub_screen.dart';
+import 'package:tantin_flutter/features/darets/presentation/screens/daret_hub_screen.dart';
 import 'package:tantin_flutter/features/darets/presentation/screens/mes_darets_screen.dart';
 import 'package:tantin_flutter/features/dashboard/presentation/screens/home_screen.dart';
 import 'package:tantin_flutter/features/join_daret/presentation/screens/approval_screen.dart';
@@ -138,7 +138,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/daret/:id',
         parentNavigatorKey: rootNavigatorKey,
         builder: (context, state) =>
-            DaretHubStubScreen(daretId: state.pathParameters['id']!),
+            DaretHubScreen(daretId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: AppRoutes.notifications,

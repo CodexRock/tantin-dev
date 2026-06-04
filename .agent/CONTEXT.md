@@ -1,6 +1,6 @@
 # Tant'in Context
 
-**Current Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
+**Current Sprint:** S5 - Daret hub + two-sided confirmation + payout + admin
 
 ## Project Status
 Flutter app (`tantin_flutter`) scaffolded and connected to the `tantin-dev` Firebase project.
@@ -152,11 +152,13 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   "Known device blockers" above): Cloud Run invoker IAM (D027) and optional `nom` (D026). Lesson:
   deployed infra + client/backend data contracts live outside the repo, so the gate/CI/emulator can pass
   green while a real device fails — the device walkthrough is a required, non-skippable gate.
-- **Next: S5 — daret hub + two-sided confirmation + payout + admin** (`build_plan/prompts/
-  S5_hub_confirmation_payout_admin.md`). It replaces the read-only hub stub with the live hub, the
-  `apayer→attente→confirmé` two-sided lifecycle (« J'ai payé ma part » / « Reçu »), « Relancer » nudges,
-  the payout celebration + clôture, and the admin tools. S5 deploys 4 new callables (advancePeriod,
-  closePeriod, closeDaret, sendNudge) — **grant their Cloud Run invoker bindings on first device call**
-  (D027). Put a hard security checkpoint on the confirmation core (rules must deny non-recipient/
-  non-admin confirms and cross-member declares).
+- **S5 Part 1 hub passed the local gate.** The read-only hub stub has been replaced by a live
+  `DaretHubScreen` with header, current-period card, contributor states/actions, progress ring,
+  Périodes/Membres/Activité tabs, and a focused widget test. User-run `dart run tool\verify.dart`
+  printed `GATE: PASS` on 2026-06-04; T1–T3 are checked in `PROGRESS_S5.md`.
+- **Next in S5:** wire the `apayer→attente→confirmé` two-sided lifecycle (« J'ai payé
+  ma part » / « Reçu »), « Relancer » nudges, and the mandatory Part-2 security checkpoint. S5 deploys
+  4 new callables (advancePeriod, closePeriod, closeDaret, sendNudge) — **grant their Cloud Run invoker
+  bindings on first device call** (D027). Put a hard security checkpoint on the confirmation core
+  (rules must deny non-recipient/non-admin confirms and cross-member declares).
 - **Then S6 — FCM notifications + polish + release**, which also RE-ENABLES App Check (reverses D022).

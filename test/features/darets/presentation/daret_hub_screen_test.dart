@@ -1,0 +1,205 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:tantin_flutter/features/activity/data/activity_providers.dart';
+import 'package:tantin_flutter/features/activity/domain/activity_event.dart';
+import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
+import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
+import 'package:tantin_flutter/features/darets/presentation/screens/daret_hub_screen.dart';
+import 'package:tantin_flutter/features/profile/data/user_providers.dart';
+import 'package:tantin_flutter/features/profile/domain/app_user.dart';
+
+const _daretId = 'daret-s5';
+
+const _user = AppUser(
+  uid: 'admin',
+  prenom: 'Yasmine',
+  nom: '',
+  name: 'Yasmine',
+  initials: 'Y',
+  phone: '+212600000000',
+  avatarPalette: ['#5247E6', '#E7E5FB'],
+);
+
+final _daret = Daret(
+  id: _daretId,
+  nom: 'Daret Famille',
+  cover: '🏡',
+  accent: '#5247E6',
+  montant: 1500,
+  frequence: DaretFrequency.mensuel,
+  periodesCount: 4,
+  cagnotteParPeriode: 6000,
+  statut: DaretStatus.actif,
+  adminUid: 'admin',
+  memberUids: const ['admin', 'karim', 'salma', 'reda'],
+  currentPeriode: 2,
+  prochaineDate: DateTime(2026, 7, 5),
+  settings: const DaretSettings(echeanceDay: 5, graceDays: 2),
+);
+
+const _members = <DaretMember>[
+  DaretMember(
+    uid: 'admin',
+    role: MemberRole.admin,
+    approvalStatus: ApprovalStatus.approved,
+    name: 'Yasmine',
+    prenom: 'Yasmine',
+    initials: 'Y',
+    avatarPalette: ['#5247E6', '#E7E5FB'],
+  ),
+  DaretMember(
+    uid: 'karim',
+    role: MemberRole.member,
+    approvalStatus: ApprovalStatus.approved,
+    name: 'Karim Tazi',
+    prenom: 'Karim',
+    initials: 'KT',
+    avatarPalette: ['#F5A623', '#FBEFD6'],
+  ),
+  DaretMember(
+    uid: 'salma',
+    role: MemberRole.member,
+    approvalStatus: ApprovalStatus.approved,
+    name: 'Salma Idrissi',
+    prenom: 'Salma',
+    initials: 'SI',
+    avatarPalette: ['#2E9E6B', '#DCF0E6'],
+  ),
+  DaretMember(
+    uid: 'reda',
+    role: MemberRole.member,
+    approvalStatus: ApprovalStatus.approved,
+    name: 'Reda Mansouri',
+    prenom: 'Reda',
+    initials: 'RM',
+    avatarPalette: ['#D2483F', '#F8DAD7'],
+  ),
+];
+
+final _periods = <DaretPeriod>[
+  DaretPeriod(
+    id: '01',
+    index: 1,
+    recipientUids: const ['karim'],
+    shares: const {'karim': 100},
+    scheduledDate: DateTime(2026, 6, 5),
+    potAmount: 4500,
+    status: PeriodStatus.closed,
+    paidCount: 3,
+    totalCount: 3,
+  ),
+  DaretPeriod(
+    id: '02',
+    index: 2,
+    recipientUids: const ['admin'],
+    shares: const {'admin': 100},
+    scheduledDate: DateTime(2026, 7, 5),
+    potAmount: 4500,
+    status: PeriodStatus.current,
+    paidCount: 1,
+    totalCount: 3,
+  ),
+  DaretPeriod(
+    id: '03',
+    index: 3,
+    recipientUids: const ['salma', 'reda'],
+    shares: const {'salma': 50, 'reda': 50},
+    scheduledDate: DateTime(2026, 8, 5),
+    potAmount: 4500,
+    status: PeriodStatus.upcoming,
+    paidCount: 0,
+    totalCount: 2,
+  ),
+];
+
+const _contributions = <Contribution>[
+  Contribution(
+    payerUid: 'admin',
+    state: ContributionState.recipient,
+    amount: 0,
+  ),
+  Contribution(
+    payerUid: 'karim',
+    state: ContributionState.apayer,
+    amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'salma',
+    state: ContributionState.attente,
+    amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'reda',
+    state: ContributionState.confirme,
+    amount: 1500,
+  ),
+];
+
+final _activity = <ActivityEvent>[
+  ActivityEvent(
+    id: 'a1',
+    type: ActivityType.paiement,
+    actorUid: 'admin',
+    text: 'a confirmé le paiement de Reda',
+    createdAt: DateTime(2026, 7, 2, 10),
+    amount: 1500,
+    periodIndex: 2,
+  ),
+];
+
+void main() {
+  testWidgets('renders current period, tabs, roster and activity', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Daret Famille'), findsOneWidget);
+    expect(find.text('BÉNÉFICIAIRE DE CE TOUR'), findsOneWidget);
+    expect(find.text("C'est votre tour !"), findsOneWidget);
+    expect(find.text('1/3 ont payé'), findsOneWidget);
+    expect(find.text('Relancer'), findsOneWidget);
+    expect(find.text('Reçu'), findsOneWidget);
+
+    await tester.tap(find.text('Périodes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Versé'), findsOneWidget);
+    expect(find.text('À venir'), findsOneWidget);
+
+    await tester.tap(find.text('Membres'));
+    await tester.pumpAndSettle();
+    expect(find.text('Yasmine (vous)'), findsOneWidget);
+    expect(find.text('Admin · Bénéficiaire actuel'), findsOneWidget);
+
+    await tester.tap(find.text('Activité'));
+    await tester.pumpAndSettle();
+    expect(find.text('a confirmé le paiement de Reda'), findsOneWidget);
+  });
+}
+
+Widget _host() {
+  return ProviderScope(
+    overrides: [
+      currentAppUserProvider.overrideWith((ref) => Stream.value(_user)),
+      daretProvider(_daretId).overrideWith((ref) => Stream.value(_daret)),
+      daretMembersProvider(_daretId).overrideWith(
+        (ref) => Stream.value(_members),
+      ),
+      periodsProvider(_daretId).overrideWith((ref) => Stream.value(_periods)),
+      currentContributionsProvider((_daretId, 2)).overrideWith(
+        (ref) => Stream.value(_contributions),
+      ),
+      activityProvider(_daretId).overrideWith(
+        (ref) => Stream.value(_activity),
+      ),
+    ],
+    child: const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: MediaQuery(
+        data: MediaQueryData(disableAnimations: true),
+        child: DaretHubScreen(daretId: _daretId),
+      ),
+    ),
+  );
+}

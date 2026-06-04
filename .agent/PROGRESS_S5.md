@@ -6,8 +6,8 @@
 > Definition of Done at the bottom is 100% checked.
 
 **Sprint:** S5 — Daret hub + two-sided confirmation + payout + admin
-**Started:** {YYYY-MM-DD}     **Status:** in progress
-**Prereqs verified:** S4 DoD signed off (PROGRESS_S4 — COMPLETE 2026-06-04, CI-green, device-proven). Baseline HEAD: {hash}
+**Started:** 2026-06-04     **Status:** in progress
+**Prereqs verified:** S4 DoD signed off (PROGRESS_S4 — COMPLETE 2026-06-04, CI-green, device-proven). Baseline HEAD: 710a140
 
 ## Objective
 Implement the active daret hub and the full trust-based two-sided confirmation lifecycle, the
@@ -22,9 +22,9 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 > Flip to [x] only when implemented AND verified. Gate between Parts.
 
 ### Part 1 — Daret hub (screens 21)
-- [ ] T1 — Hub header: nom, cagnotte, « Période en cours X/N » + dates (expand transition from card if feasible)
-- [ ] T2 — « Période en cours » card: Bénéficiaire badge, two-sided state checklist (À payer/En attente/Confirmé/En retard), per-member « Relancer », progress ring « 8/12 ont payé »
-- [ ] T3 — Hub sections/tabs: Périodes (timeline past/current/upcoming), Membres (roster + roles/states), Activité (this daret's log)
+- [x] T1 — Hub header: nom, cagnotte, « Période en cours X/N » + dates (expand transition from card if feasible)
+- [x] T2 — « Période en cours » card: Bénéficiaire badge, two-sided state checklist (À payer/En attente/Confirmé/En retard), per-member « Relancer », progress ring « 8/12 ont payé »
+- [x] T3 — Hub sections/tabs: Périodes (timeline past/current/upcoming), Membres (roster + roles/states), Activité (this daret's log)
 
 ### Part 2 — Two-sided confirmation (screens 22) — THE CORE MECHANIC
 - [ ] T4 — Payer: « J'ai payé ma part » → ConfirmPaySheet (incl. « Tant'in ne traite pas d'argent ») → `apayer/retard → attente`, optimistic, Function-written
@@ -46,13 +46,26 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - [ ] T13 — Tests + docs (CONTEXT/DECISIONS/this file); goldens for new screens with committed baselines
 
 ## Work log
-- {YYYY-MM-DD HH:MM} — {what I did / decided / discovered}. commit: {hash}
+- 2026-06-04 12:07 — Read operating manual, CONTEXT, DECISIONS, S5 prompt, and prototype sources (`hub.jsx`, `hub2.jsx`, `app.jsx`). Confirmed baseline HEAD `710a140` (S5 progress skeleton) with S4 sign-off at `8158fc4`. Began Part 1 only per sprint gate. commit: pending
+- 2026-06-04 12:07 — Replaced the read-only hub stub with `DaretHubScreen`: live header, current-period beneficiary card, contributor checklist/state actions (UI-only until Part 2), progress ring, Périodes/Membres/Activité tabs, and router wiring. Added focused widget test `test/features/darets/presentation/daret_hub_screen_test.dart`. Gate pending user-run `dart run tool\verify.dart` (sprint brief forbids agent-run Dart/npm/Firebase/gcloud). commit: pending
+- 2026-06-04 12:22 — User-run Part 1 gate returned `GATE: FAIL`: analyzer infos in `daret_hub_screen.dart` plus a widget-test expectation mismatch on the member tab. Fixed the reported analyzer nits and changed the test to assert the actual admin/beneficiary subtitle (`Admin · Bénéficiaire actuel`). Awaiting rerun. commit: pending
+- 2026-06-04 12:35 — User reran `dart run tool\verify.dart`; Part 1 gate is green (`GATE: PASS`). Checked T1–T3 only. commit: pending
 
 ## Verification evidence (PASTE REAL OUTPUT — no adjectives, per the Prime Directive)
 
 ### Part-1 gate — `dart run tool/verify.dart`
 ```
-{paste SUMMARY + GATE: PASS}
+═══════════════════════════════════════════════
+ SUMMARY
+═══════════════════════════════════════════════
+  ✅  Resolve dependencies
+  ✅  Generate l10n
+  ✅  Codegen reproduces
+  ✅  Format check
+  ✅  Static analysis
+  ✅  Tests
+═══════════════════════════════════════════════
+GATE: PASS ✅  — safe to check DoD boxes.
 ```
 
 ### Part-2 SECURITY CHECKPOINT — rules tests (`npm test` / `npm run test:rules`)
@@ -69,7 +82,7 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 ```
 {paste SUMMARY + GATE: PASS}
 ```
-- Tests added this sprint: {names}
+- Tests added this sprint: `test/features/darets/presentation/daret_hub_screen_test.dart` (Part 1 hub render/tabs smoke)
 - Screens compared to prototype (hub/sheets/payout/clôture/admin): {match? goldens committed?}
 
 ### CI proof — `dart run tool/check_ci.dart`
@@ -84,6 +97,7 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 {firebase deploy --only functions/firestore — deployed? For the 4 S5 callables first-invoked on device (advancePeriod/closePeriod/closeDaret/sendNudge), confirm Cloud Run invoker bindings (D027) granted & verified.}
 
 ## Blockers / questions for the user
+- Part 1 gate passed. Next: Part 2 confirmation core + mandatory security checkpoint.
 - WATCH (D027): on first device call, the new callables (advancePeriod, closePeriod, closeDaret, sendNudge)
   may return raw `[firebase_functions/unauthenticated] UNAUTHENTICATED` (missing Cloud Run invoker binding).
   Fix proactively: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
