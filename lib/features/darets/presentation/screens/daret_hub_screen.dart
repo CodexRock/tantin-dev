@@ -835,21 +835,26 @@ class _AdminMenuSheet extends StatelessWidget {
             onPressed: () =>
                 Navigator.of(context).pop(_AdminAction.editDetails),
           ),
-          const SizedBox(height: 8),
-          _AdminMenuRow(
-            icon: TnIcons.stack(size: 19, color: TantinColors.majorelle),
-            label: "Réorganiser l'ordre",
-            sub: 'Changer l’ordre des tours à venir',
-            onPressed: () => Navigator.of(context).pop(_AdminAction.reorder),
-          ),
-          const SizedBox(height: 8),
-          _AdminMenuRow(
-            icon: TnIcons.users(size: 19, color: TantinColors.majorelle),
-            label: 'Remplacer un membre',
-            sub: 'Libérer une place et ré-inviter',
-            onPressed: () =>
-                Navigator.of(context).pop(_AdminAction.replaceMember),
-          ),
+          // Réorganiser / remplacer only apply to an active daret (they rewrite
+          // upcoming tours server-side); hide them otherwise so the admin never
+          // hits a "Only active darets…" rejection.
+          if (daret.statut == DaretStatus.actif) ...[
+            const SizedBox(height: 8),
+            _AdminMenuRow(
+              icon: TnIcons.stack(size: 19, color: TantinColors.majorelle),
+              label: "Réorganiser l'ordre",
+              sub: 'Changer l’ordre des tours à venir',
+              onPressed: () => Navigator.of(context).pop(_AdminAction.reorder),
+            ),
+            const SizedBox(height: 8),
+            _AdminMenuRow(
+              icon: TnIcons.users(size: 19, color: TantinColors.majorelle),
+              label: 'Remplacer un membre',
+              sub: 'Libérer une place et ré-inviter',
+              onPressed: () =>
+                  Navigator.of(context).pop(_AdminAction.replaceMember),
+            ),
+          ],
           const SizedBox(height: 14),
           _AdminMenuRow(
             icon: TnIcons.trash(size: 19, color: TantinColors.danger),
@@ -3548,11 +3553,16 @@ class _ContributionRow extends StatelessWidget {
           ),
           if (actions.isNotEmpty) ...[
             const SizedBox(width: 10),
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 6,
-              runSpacing: 6,
-              children: actions,
+            // Flexible (not a bare Wrap) so two action buttons wrap onto a
+            // second line on narrow screens instead of crushing the name/badge
+            // column into an overflow.
+            Flexible(
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 6,
+                runSpacing: 6,
+                children: actions,
+              ),
             ),
           ],
         ],

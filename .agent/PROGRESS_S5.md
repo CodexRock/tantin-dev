@@ -190,14 +190,29 @@ GATE: PASS ✅
 
 ### CI proof — `dart run tool/check_ci.dart`
 ```
-{paste — CI: GREEN, both `verify` + `backend` success, run URL}
+═══════════════════════════════════════════════
+ CI gate — CodexRock/tantin-dev @ b4331dc
+═══════════════════════════════════════════════
+ conclusion: success
+ https://github.com/CodexRock/tantin-dev/actions/runs/26961095779
+═══════════════════════════════════════════════
+CI: GREEN ✅
 ```
 
 ### On-device walkthrough (user-run, physical Android)
 {declare → confirm(green) → relancer → period advances → payout (confetti + count-up + share card) → clôture → admin réorganiser/remplacer/supprimer. Paste result + any blocker found & fix.}
 
 ### Cloud config deployed this sprint
-{firebase deploy --only functions/firestore — deployed? For the 4 S5 callables first-invoked on device (advancePeriod/closePeriod/closeDaret/sendNudge), confirm Cloud Run invoker bindings (D027) granted & verified.}
+```
+firebase deploy --only functions --project tantin-dev  → Deploy complete!
+  created:  reorderPeriods, replaceMember, editDaretDetails, deleteDaret (europe-west1)
+  updated:  startDaret, createInvite, previewDaret, joinDaret, approveDaret,
+            advancePeriod, closePeriod, closeDaret, sendNudge, seedDev,
+            onContributionWritten, onMemberCreated, dailyReminders
+```
+D027 invoker bindings (`allUsers` → `roles/run.invoker`, europe-west1) — to grant/verify for
+the 8 device-invoked callables: reorderperiods, replacemember, editdaretdetails, deletedaret,
+advanceperiod, closeperiod, closedaret, sendnudge. {paste gcloud results}
 
 ## Blockers / questions for the user
 - Parts 1–3 done and gate-green. Next: Part 4 (admin) + close-out (CI proof, device walkthrough, goldens decision). Before the device walkthrough, grant the D027 invoker bindings on the 4 S5 callables (see WATCH below).
@@ -222,7 +237,7 @@ GATE: PASS ✅
 - [x] Admin tools work and are admin-gated (rules + Function checks); delete has a confirmation guard (local gate + 24 functions tests; on-device confirmation pending the walkthrough line below)
 - [x] `dart run tool/verify.dart` → `GATE: PASS` (output pasted above)
 - [x] Backend Functions + security-rules emulator tests pass (output pasted above — 24 + 25)
-- [ ] CI is green for the pushed commit — `dart run tool/check_ci.dart` → `CI: GREEN` (pasted above)
+- [x] CI is green for the pushed commit — `dart run tool/check_ci.dart` → `CI: GREEN` (b4331dc, pasted above)
 - [x] New/changed UI visually matches the prototype; golden coverage decision recorded (D029: admin sheets covered by interaction widget tests + device walkthrough, no new alchemist golden — conscious choice per the brief, like the S3 read screens)
 - [ ] App builds & touched flows run on Android without runtime errors (device walkthrough pasted)
 - [x] `CONTEXT.md`, `DECISIONS.md`, this file are updated & accurate
