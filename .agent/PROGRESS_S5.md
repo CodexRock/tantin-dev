@@ -1,0 +1,115 @@
+# PROGRESS — Sprint S5: Daret Hub + Two-Sided Confirmation + Payout + Admin
+
+> Update the checklist and work log CONTINUOUSLY (after each task), not in one dump at the end.
+> Flip a box to `[x]` ONLY with pasted evidence below. `[~] BLOCKED: reason` for parked work.
+> A false `[x]` is the worst outcome on this project. The sprint is complete only when the
+> Definition of Done at the bottom is 100% checked.
+
+**Sprint:** S5 — Daret hub + two-sided confirmation + payout + admin
+**Started:** {YYYY-MM-DD}     **Status:** in progress
+**Prereqs verified:** S4 DoD signed off (PROGRESS_S4 — COMPLETE 2026-06-04, CI-green, device-proven). Baseline HEAD: {hash}
+
+## Objective
+Implement the active daret hub and the full trust-based two-sided confirmation lifecycle, the
+celebratory payout moment, and the admin management tools. After this sprint a daret can be operated
+end-to-end: members declare payments, recipients/admin confirm, the period progresses, the beneficiary
+gets the celebration + shareable card, and the admin can manage everything through to clôture. This
+sprint REPLACES the read-only stub (`lib/features/darets/presentation/screens/daret_hub_stub_screen.dart`)
+with the live hub and wires daret-card taps + the Accueil hero button to it.
+Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (ConfirmPay/Received/ShareCard/Admin).
+
+## Task checklist
+> Flip to [x] only when implemented AND verified. Gate between Parts.
+
+### Part 1 — Daret hub (screens 21)
+- [ ] T1 — Hub header: nom, cagnotte, « Période en cours X/N » + dates (expand transition from card if feasible)
+- [ ] T2 — « Période en cours » card: Bénéficiaire badge, two-sided state checklist (À payer/En attente/Confirmé/En retard), per-member « Relancer », progress ring « 8/12 ont payé »
+- [ ] T3 — Hub sections/tabs: Périodes (timeline past/current/upcoming), Membres (roster + roles/states), Activité (this daret's log)
+
+### Part 2 — Two-sided confirmation (screens 22) — THE CORE MECHANIC
+- [ ] T4 — Payer: « J'ai payé ma part » → ConfirmPaySheet (incl. « Tant'in ne traite pas d'argent ») → `apayer/retard → attente`, optimistic, Function-written
+- [ ] T5 — Recipient/admin: « Reçu » → ReceivedSheet → `attente → confirmé` (green, confirmedAt/By); admin can mark directly
+- [ ] T6 — « Relancer » → `sendNudge` (rate-limited) → success toast
+- [ ] T7 — All confirmed → period advances (`advancePeriod`/trigger); new current period reflects live; no illegal client transitions
+- [ ] **SECURITY CHECKPOINT (mandatory, before Part 3)** — rules tests prove: non-recipient/non-admin cannot confirm; member can only declare their own; no client write to period.status/aggregates. `npm test`/`npm run test:rules` green + pasted. STOP and post checkpoint message; wait for lead go-ahead.
+
+### Part 3 — Payout celebration + clôture (screens 23, 24)
+- [ ] T8 — « C'est ton tour! » payout takeover: confetti + amount count-up + shareable « payout reçu » card (ShareCardSheet → share_plus image). Celebration only, NO gamification
+- [ ] T9 — Clôture du daret: closing summary + thanks (`closeDaret`) → moves to Terminés; lifetime stats updated
+
+### Part 4 — Admin (screens 25, 26) — build FULLY, not stubs
+- [ ] T10 — Gérer le daret (AdminSheets): edit details, réorganiser l'ordre, remplacer un membre, manage/close a period, adjust amounts, supprimer le daret (confirmation guard). Admin-gated by rules + Functions
+- [ ] T11 — Period management: force-close by status/date + advance (`closePeriod`/`advancePeriod`), confirmation + activity logging
+
+### Rollup
+- [ ] T12 — Wire every S5 Function (sendNudge, advancePeriod, closePeriod, closeDaret, onContributionWritten); verify aggregates/activity/push produced
+- [ ] T13 — Tests + docs (CONTEXT/DECISIONS/this file); goldens for new screens with committed baselines
+
+## Work log
+- {YYYY-MM-DD HH:MM} — {what I did / decided / discovered}. commit: {hash}
+
+## Verification evidence (PASTE REAL OUTPUT — no adjectives, per the Prime Directive)
+
+### Part-1 gate — `dart run tool/verify.dart`
+```
+{paste SUMMARY + GATE: PASS}
+```
+
+### Part-2 SECURITY CHECKPOINT — rules tests (`npm test` / `npm run test:rules`)
+```
+{paste; must show the new deny tests: non-recipient/non-admin cannot confirm; member can only declare own}
+```
+
+### Functions tests — `npm run test:functions`
+```
+{paste Test Suites/Tests counts; bare `jest` fails with "FIRESTORE_EMULATOR_HOST must be set"}
+```
+
+### Final canonical gate — `dart run tool/verify.dart`
+```
+{paste SUMMARY + GATE: PASS}
+```
+- Tests added this sprint: {names}
+- Screens compared to prototype (hub/sheets/payout/clôture/admin): {match? goldens committed?}
+
+### CI proof — `dart run tool/check_ci.dart`
+```
+{paste — CI: GREEN, both `verify` + `backend` success, run URL}
+```
+
+### On-device walkthrough (user-run, physical Android)
+{declare → confirm(green) → relancer → period advances → payout (confetti + count-up + share card) → clôture → admin réorganiser/remplacer/supprimer. Paste result + any blocker found & fix.}
+
+### Cloud config deployed this sprint
+{firebase deploy --only functions/firestore — deployed? For the 4 S5 callables first-invoked on device (advancePeriod/closePeriod/closeDaret/sendNudge), confirm Cloud Run invoker bindings (D027) granted & verified.}
+
+## Blockers / questions for the user
+- WATCH (D027): on first device call, the new callables (advancePeriod, closePeriod, closeDaret, sendNudge)
+  may return raw `[firebase_functions/unauthenticated] UNAUTHENTICATED` (missing Cloud Run invoker binding).
+  Fix proactively: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
+  --role=roles/run.invoker --region=europe-west1 --project=tantin-dev`. Do NOT bind triggers.
+- {others | none}
+
+## Commits this sprint
+- {hash} {message}
+
+## ── DEFINITION OF DONE (gate) ──
+> Legend: `[x]` done & verified this session · `[~] BLOCKED: reason` · `[ ]` not yet.
+> NEVER mark `[x]` without evidence above.
+- [ ] Every task above is [x] and actually implemented (admin built fully, not stubs; hub replaces the stub)
+- [ ] A full period operates end-to-end: declare → recipient/admin confirms → progress updates → period advances → clôture; live/real-time, optimistic, offline-tolerant
+- [ ] Two-sided state machine cannot be bypassed from the client (non-recipient/non-admin cannot confirm; member declares only their own) — proven by rules tests
+- [ ] Payout matches the prototype (confetti + count-up + shareable card via share sheet)
+- [ ] Admin tools work and are admin-gated (rules + Function checks); delete has a confirmation guard
+- [ ] `dart run tool/verify.dart` → `GATE: PASS` (output pasted above)
+- [ ] Backend Functions + security-rules emulator tests pass (output pasted above)
+- [ ] CI is green for the pushed commit — `dart run tool/check_ci.dart` → `CI: GREEN` (pasted above)
+- [ ] New/changed UI visually matches the prototype; golden test(s) exist & committed (tagged `golden`, D011)
+- [ ] App builds & touched flows run on Android without runtime errors (device walkthrough pasted)
+- [ ] `CONTEXT.md`, `DECISIONS.md`, this file are updated & accurate
+- [ ] All work committed (per task) and pushed; commit hashes listed above
+- [ ] No secrets/private keys committed; App Check NOT touched (stays OFF in dev per D022)
+- [ ] Cloud config changes deployed & verified live; new-callable invoker bindings granted (D027)
+- [ ] "Sprint S5 complete — ready for architect audit" posted to the user (with pasted gate result + CI link)
+
+**Sprint sign-off:** {pending}
