@@ -152,7 +152,12 @@ class CreateDaretState {
   final String? submitError;
   final CreateDaretResult? result;
 
-  int get cagnotteParPeriode => montant * participants.length;
+  int get cagnotteParPeriode => montant * periodesCount;
+  int get payoutParPeriode {
+    final contributingShares = periodesCount <= 1 ? 0 : periodesCount - 1;
+    return montant * contributingShares;
+  }
+
   bool get hasCurrentUser => participants.any(
     (participant) => participant.kind == CreateParticipantKind.self,
   );

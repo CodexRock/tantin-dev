@@ -127,6 +127,19 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
 - Do not commit service-account JSON keys or FCM server keys.
 
 ## What's Done / What's Next
+- **Current checkpoint override (2026-06-04):** S4 create wizard / drag-drop assignment / join + approval
+  is implemented and committed through `a3baca3`; CI run 26917868600 was GREEN for the app `verify` job and
+  backend job (confirmed by the user). Current `HEAD` is docs-only commit `9024973` (`[skip ci]`).
+- **S4 device bug fix in progress:** physical-device testing found incorrect period-share math and
+  `[firebase_functions/unauthenticated]` on `startDaret`. The current dirty tree fixes the math model:
+  gross cagnotte = base amount * period count, period payout = base amount * (period count - 1), and grouped
+  recipients split one period share for both monthly payments and payouts. A callable auth guard now
+  force-refreshes the Firebase ID token before each callable. `npm test` is PASS after this fix, and the
+  user-run `dart run tool/verify.dart` is PASS for the current tree. Functions deploy and physical-device
+  retest are still required.
+- **Supersedes older bullets below:** the previous S3/S4 handoff notes in this section are historical and
+  should not be used as the current state.
+
 - **Current checkpoint:** S3 **Part 4 read screens are done and CI-green** (commit `7b2ead0`, run
   26881095108: `verify` + `backend` both success). The 5-tab shell is real — Accueil (hero next-action
   + Ce mois-ci summary + active darets), Mes Darets (segmented), Calendrier (period agenda), Activité

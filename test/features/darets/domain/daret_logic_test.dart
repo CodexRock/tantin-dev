@@ -5,7 +5,16 @@ import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
 void main() {
   group('daret math', () {
     test('computes the pot for one period', () {
-      expect(cagnotteParPeriode(montant: 1500, memberCount: 12), 18000);
+      expect(cagnotteParPeriode(montant: 1500, periodesCount: 12), 18000);
+    });
+
+    test('computes group share payment and payout amounts', () {
+      expect(cagnotteParPeriode(montant: 1000, periodesCount: 7), 7000);
+      expect(payoutFromOtherShares(montant: 1000, periodesCount: 7), 6000);
+      expect(amountForShare(amount: 1000, share: 40), 400);
+      expect(amountForShare(amount: 1000, share: 60), 600);
+      expect(amountForShare(amount: 6000, share: 40), 2400);
+      expect(amountForShare(amount: 6000, share: 60), 3600);
     });
 
     test('generates monthly dates and clamps short months', () {

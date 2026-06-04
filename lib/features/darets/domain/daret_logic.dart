@@ -68,12 +68,32 @@ class DashboardNextAction {
 
 int cagnotteParPeriode({
   required int montant,
-  required int memberCount,
+  required int periodesCount,
 }) {
-  if (montant <= 0 || memberCount <= 0) {
-    throw ArgumentError('montant and memberCount must be positive');
+  if (montant <= 0 || periodesCount <= 0) {
+    throw ArgumentError('montant and periodesCount must be positive');
   }
-  return montant * memberCount;
+  return montant * periodesCount;
+}
+
+int payoutFromOtherShares({
+  required int montant,
+  required int periodesCount,
+}) {
+  if (montant <= 0 || periodesCount <= 0) {
+    throw ArgumentError('montant and periodesCount must be positive');
+  }
+  return montant * (periodesCount - 1);
+}
+
+int amountForShare({
+  required int amount,
+  required int share,
+}) {
+  if (amount < 0 || share < 0 || share > 100) {
+    throw ArgumentError('amount must be non-negative and share 0..100');
+  }
+  return (amount * share / 100).round();
 }
 
 List<DateTime> generateSchedule({

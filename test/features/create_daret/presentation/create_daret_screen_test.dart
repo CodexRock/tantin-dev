@@ -38,6 +38,15 @@ const _salma = CreateParticipant(
   kind: CreateParticipantKind.app,
 );
 
+const _nadia = CreateParticipant(
+  uid: 'nadia',
+  name: 'Nadia Bennani',
+  prenom: 'Nadia',
+  initials: 'NB',
+  avatarPalette: ['#D2483F', '#F8DAD7'],
+  kind: CreateParticipantKind.app,
+);
+
 void main() {
   testWidgets('dragging a tray member places them into a period slot', (
     tester,
@@ -59,6 +68,26 @@ void main() {
 
     expect(controller.state.slots.first.recipientUids, const ['karim']);
     expect(controller.state.slots.first.shares, const {'karim': 100});
+  });
+
+  testWidgets('group split sheet redraws share totals live', (tester) async {
+    final controller = _groupController();
+
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('GROUPE').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Total des parts : 100%'), findsOneWidget);
+
+    final firstShare = tester.getCenter(find.text('50%').first);
+    await tester.tapAt(firstShare + const Offset(45, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('55%'), findsOneWidget);
+    expect(find.text('Total des parts : 105%'), findsOneWidget);
+    expect(controller.state.slots.first.shareSum, 105);
   });
 }
 
@@ -88,6 +117,19 @@ CreateDaretController _orderController() {
     ..setPeriodesCount(3)
     ..toggleParticipant(_karim)
     ..toggleParticipant(_salma)
+    ..setStep(4);
+  return controller;
+}
+
+CreateDaretController _groupController() {
+  final controller = CreateDaretController()
+    ..ensureCurrentUser(_user)
+    ..setNom('Daret Famille')
+    ..setPeriodesCount(3)
+    ..toggleParticipant(_karim)
+    ..toggleParticipant(_salma)
+    ..toggleParticipant(_nadia)
+    ..autoOrganize()
     ..setStep(4);
   return controller;
 }

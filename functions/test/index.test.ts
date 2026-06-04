@@ -270,6 +270,43 @@ describe('daret state integrity', () => {
     expect(contribution.data()).toMatchObject({payerUid: 'joiner', state: 'apayer', amount: 1500});
   });
 
+  test('startDaret treats grouped recipients as one share for contribution amounts', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('x', 'User X');
+    await seedUser('y', 'User Y');
+    await seedUser('solo', 'Solo');
+    await seedS4GroupDraftPayloadDaret('d2');
+
+    const started = await __testables.startDaretHandler(ctx('admin', {daretId: 'd2'}), deps());
+
+    expect(started).toEqual({status: 'attente', currentPeriode: 1});
+    const startedDaret = await db.collection('darets').doc('d2').get();
+    expect(startedDaret.data()).toMatchObject({
+      statut: 'attente',
+      currentPeriode: 1,
+      cagnotteParPeriode: 3000,
+      memberUids: ['admin', 'x', 'y', 'solo'],
+    });
+    const groupPeriod = await db.collection('darets').doc('d2').collection('periods').doc('02').get();
+    expect(groupPeriod.data()).toMatchObject({
+      recipientUids: ['x', 'y'],
+      shares: {x: 40, y: 60},
+      potAmount: 2000,
+    });
+
+    await __testables.approveDaretHandler(ctx('x', {daretId: 'd2'}), deps());
+    await __testables.approveDaretHandler(ctx('y', {daretId: 'd2'}), deps());
+    const activated = await __testables.approveDaretHandler(ctx('solo', {daretId: 'd2'}), deps());
+
+    expect(activated).toEqual({activated: true});
+    const periodOneRef = db.collection('darets').doc('d2').collection('periods').doc('01');
+    const periodOne = await periodOneRef.get();
+    expect(periodOne.data()).toMatchObject({potAmount: 2000, totalCount: 3});
+    await expectContributionAmount(periodOneRef, 'x', 400);
+    await expectContributionAmount(periodOneRef, 'y', 600);
+    await expectContributionAmount(periodOneRef, 'solo', 1000);
+  });
+
   test('startDaret rejects malformed period shares', async () => {
     await seedUser('admin', 'Admin');
     await seedUser('member', 'Member');
@@ -483,7 +520,7 @@ async function seedDraftDaret(
     montant: 1500,
     frequence: 'Mensuel',
     periodesCount,
-    cagnotteParPeriode: 1500 * memberUids.length,
+    cagnotteParPeriode: 1500 * periodesCount,
     statut,
     adminUid,
     memberUids,
@@ -518,7 +555,7 @@ async function seedS4DraftPayloadDaret(daretId: string): Promise<void> {
     montant: 1500,
     frequence: 'Mensuel',
     periodesCount: 2,
-    cagnotteParPeriode: 1500,
+    cagnotteParPeriode: 3000,
     statut: 'brouillon',
     adminUid: 'admin',
     memberUids: ['admin'],
@@ -555,13 +592,58 @@ async function seedS4DraftPayloadDaret(daretId: string): Promise<void> {
   });
 }
 
+async function seedS4GroupDraftPayloadDaret(daretId: string): Promise<void> {
+  await db.collection('darets').doc(daretId).set({
+    nom: 'Daret Group Test',
+    cover: 'home',
+    accent: '#5247E6',
+    montant: 1000,
+    frequence: 'Mensuel',
+    periodesCount: 3,
+    cagnotteParPeriode: 3000,
+    statut: 'brouillon',
+    adminUid: 'admin',
+    memberUids: ['admin'],
+    currentPeriode: 0,
+    prochaineDate: fixedNow,
+    inviteCode: null,
+    settings: {echeanceDay: 5, graceDays: 2},
+    createdAt: fixedNow,
+    startedAt: null,
+    closedAt: null,
+    draftMembers: [
+      {uid: 'admin', avatarPalette: ['#5247E6', '#E7E5FB']},
+      {uid: 'x', avatarPalette: ['#F5A623', '#FBEFD6']},
+      {uid: 'y', avatarPalette: ['#2E9E6B', '#DCF0E6']},
+      {uid: 'solo', avatarPalette: ['#D2483F', '#F8DAD7']},
+    ],
+    draftPeriods: [
+      {
+        index: 1,
+        recipientUids: ['admin'],
+        shares: {admin: 100},
+      },
+      {
+        index: 2,
+        recipientUids: ['x', 'y'],
+        shares: {x: 40, y: 60},
+      },
+      {
+        index: 3,
+        recipientUids: ['solo'],
+        shares: {solo: 100},
+      },
+    ],
+  });
+}
+
 async function seedPeriodDocs(daretId: string): Promise<void> {
   await db.collection('darets').doc(daretId).collection('periods').doc('01').set({
     index: 1,
     recipientUids: ['admin'],
     shares: {admin: 100},
     scheduledDate: fixedNow,
-    potAmount: 3000,
+    potAmount: 1500,
     status: 'current',
     paidCount: 0,
     totalCount: 1,
@@ -572,11 +654,24 @@ async function seedPeriodDocs(daretId: string): Promise<void> {
     recipientUids: ['member'],
     shares: {member: 100},
     scheduledDate: Timestamp.fromDate(new Date('2026-07-02T09:00:00Z')),
-    potAmount: 3000,
+    potAmount: 1500,
     status: 'upcoming',
     paidCount: 0,
     totalCount: 1,
     closedAt: null,
+  });
+}
+
+async function expectContributionAmount(
+  periodRef: DocumentReference,
+  uid: string,
+  amount: number,
+): Promise<void> {
+  const contribution = await periodRef.collection('contributions').doc(uid).get();
+  expect(contribution.data()).toMatchObject({
+    payerUid: uid,
+    state: 'apayer',
+    amount,
   });
 }
 

@@ -57,6 +57,15 @@ void main() {
       );
     });
 
+    test('calculates gross cagnotte from base amount and period count', () {
+      const state = CreateDaretState(
+        periodesCount: 7,
+      );
+
+      expect(state.cagnotteParPeriode, 7000);
+      expect(state.payoutParPeriode, 6000);
+    });
+
     test('moves a participant between slots without duplicating them', () {
       var slots = CreateDaretLogic.initialSlots(3);
 

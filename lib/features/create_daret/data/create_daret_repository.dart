@@ -17,7 +17,7 @@ class CreateDaretRepository {
     final draftMembers = draft.participants
         .map((participant) => participant.toDraftMember())
         .toList(growable: false);
-    final potAmount = draft.montant * draft.participants.length;
+    final potAmount = draft.payoutParPeriode;
     final draftPeriods = <Map<String, Object?>>[
       for (var i = 0; i < draft.slots.length; i += 1)
         draft.slots[i].toDraftPeriod(scheduledDates[i], potAmount),
@@ -30,7 +30,7 @@ class CreateDaretRepository {
       'montant': draft.montant,
       'frequence': draft.frequence.firestoreValue,
       'periodesCount': draft.periodesCount,
-      'cagnotteParPeriode': draft.montant,
+      'cagnotteParPeriode': draft.cagnotteParPeriode,
       'statut': DaretStatus.brouillon.firestoreValue,
       'adminUid': creator.uid,
       'memberUids': [creator.uid],

@@ -1,4 +1,5 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class DaretPreview {
   const DaretPreview({
@@ -42,9 +43,10 @@ class DaretPreview {
 }
 
 class DaretCallableRepository {
-  const DaretCallableRepository(this._functions);
+  const DaretCallableRepository(this._functions, this._auth);
 
   final FirebaseFunctions _functions;
+  final FirebaseAuth _auth;
 
   Future<void> startDaret(String daretId) {
     return _callVoid('startDaret', {'daretId': daretId});
@@ -104,6 +106,7 @@ class DaretCallableRepository {
   }
 
   Future<void> _callVoid(String name, Map<String, dynamic> parameters) async {
+    await _requireAuthToken();
     await _functions.httpsCallable(name).call<void>(parameters);
   }
 
@@ -111,11 +114,22 @@ class DaretCallableRepository {
     String name,
     Map<String, dynamic> parameters,
   ) async {
+    await _requireAuthToken();
     final result = await _functions
         .httpsCallable(name)
         .call<Object?>(
           parameters,
         );
     return Map<String, dynamic>.from(result.data! as Map<Object?, Object?>);
+  }
+
+  Future<void> _requireAuthToken() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError(
+        'Utilisateur non connecté. Déconnectez-vous puis reconnectez-vous.',
+      );
+    }
+    await user.getIdToken(true);
   }
 }

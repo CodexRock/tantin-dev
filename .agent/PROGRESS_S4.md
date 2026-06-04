@@ -1,15 +1,16 @@
 # PROGRESS - Sprint S4: Create Wizard + Drag-Drop + Join
 
 **Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
-**Started:** 2026-06-03     **Status:** Codegen blocker RESOLVED (2026-06-04, D025); finishing S4
+**Started:** 2026-06-03     **Status:** Device bug fixes gate PASS; push/CI, Functions deploy, and device retest pending
 **Prereqs verified:** Y
 
 ## Objective
 Build the real destinations behind the existing "Creer / Rejoindre" sheet:
 the 5-step create-daret wizard, the signature drag-drop payout ordering with
 group splits, invite-code sharing, join-by-code preview, and member approval.
-Privileged writes remain Function-owned; no client writes to server-owned
-integrity fields.
+The client writes only the rules-constrained draft root described in D024; all
+privileged state transitions and server-owned member/period/contribution writes
+remain Function-owned.
 
 ## Task checklist
 - [x] T0 - Onboarding, pull, inherited gate, and S4 progress record
@@ -90,9 +91,51 @@ integrity fields.
   to `lib test tool` (node_modules template broke `dart format .`); removed the dead `custom_lint` gate step;
   deleted the throwaway S0 smoke files. Recorded **DECISIONS D025**. Riverpod 3 migration → S6 tech-debt.
 
+- 2026-06-04 - Verification/self-review pass (no S5 work). Confirmed S4 routes from the global "+" sheet
+  go to the real create/join screens; S4 approval/share screen is separate from the read-only daret hub
+  stub; App Check remains OFF in dev per D022; D025 manual Riverpod providers are reflected in CONTEXT and
+  DECISIONS. Reviewed create wizard/order/join/approval code against the S4 prompt and found one S4 bug:
+  the group split bottom sheet was built from a stale slot snapshot, so +/- changed controller state but the
+  open sheet did not redraw the visible percentages/total live. Fixed it by making the sheet body watch
+  `createDaretControllerProvider` while open and added a widget regression test:
+  `group split sheet redraws share totals live`.
+- 2026-06-04 - User ran `dart run tool/verify.dart` after the verification fix and pasted a green gate:
+  dependency resolution, l10n, build_runner, format, `flutter analyze --fatal-infos`, and `flutter test`
+  all passed; tests ended at `00:42 +57: All tests passed!`; final line was `GATE: PASS`.
+- 2026-06-04 - Physical-device creation walkthrough found two blockers: (1) Step 2/3 used member count
+  rather than period count for the displayed cagnotte and used full-member contributions for grouped
+  recipients; (2) final submit failed at `startDaret` with `[firebase_functions/unauthenticated]
+  UNAUTHENTICATED` in the physical-device stack trace. Fixed the math model in Flutter and Functions:
+  gross cagnotte = `montant * periodesCount`; period payout = `montant * (periodesCount - 1)`; a group
+  slot is one share, so 40/60 members pay 40/60 of the base amount and receive 40/60 of the payout from
+  the other shares. Added Flutter domain tests and a Functions regression covering grouped recipients.
+  Added a client callable auth guard that force-refreshes the Firebase ID token before every callable.
+  Note: App Check remains disabled in source per D022; if the device still returns unauthenticated after
+  deploying this Functions bundle, verify the live Functions deployment and Auth session/debug token state.
+- 2026-06-04 - User reran `dart run tool/verify.dart` after the period-share/auth fixes. Fresh gate is
+  green for the current device-bug-fix tree: dependencies, l10n, codegen, format, static analysis, and
+  tests all passed; tests ended at `00:28 +59: All tests passed!`; final line was `GATE: PASS`.
+
 ## Verification evidence
 
+### Post-review verification fix canonical gate (2026-06-04) - `dart run tool/verify.dart`
+User-run from `C:\users\harchane\Tant_in_design\tantinFlutter` after the group split sheet live-redraw fix:
+```
+SUMMARY
+  Resolve dependencies: PASS
+  Generate l10n: PASS
+  Codegen reproduces: PASS
+  Format check: PASS
+  Static analysis: PASS
+  Tests: PASS (00:42 +57: All tests passed!)
+GATE: PASS
+```
+
 ### POST-FIX canonical gate (2026-06-04) — `dart run tool/verify.dart`
+This PASS was recorded before the 2026-06-04 verification fix to the group split sheet. It proves the
+committed S4 implementation through `a3baca3`; the current dirty working tree is proven by the
+post-review verification fix gate above.
+
 Toolchain: analyzer 10.0.1, build_runner 2.15.0, freezed ^3.2, json_serializable 6.11.4,
 flutter_riverpod 2.6.1 (runtime), riverpod codegen REMOVED (D025). Flutter 3.41.2 / Dart 3.11.0.
 ```
@@ -138,6 +181,28 @@ Time:        24.325 s, estimated 33 s
 Ran all test suites.
 ```
 
+### Backend grouped-share regression after device bug (2026-06-04) - `npm test`
+Agent-run after fixing the period-share math:
+```
+Rules: Test Suites: 2 passed, 2 total; Tests: 20 passed, 20 total.
+Functions: Test Suites: 1 passed, 1 total; Tests: 15 passed, 15 total.
+New coverage: grouped recipients are one share; 40/60 group on base 1000 generates 400/600 monthly
+contributions and 40/60 of the period payout.
+```
+
+### Fresh Flutter gate after device bug fixes (2026-06-04) - `dart run tool/verify.dart`
+User-run from `C:\users\harchane\Tant_in_design\tantinFlutter`:
+```
+SUMMARY
+  Resolve dependencies: PASS
+  Generate l10n: PASS
+  Codegen reproduces: PASS
+  Format check: PASS
+  Static analysis: PASS
+  Tests: PASS (00:28 +59: All tests passed!)
+GATE: PASS
+```
+
 ### S4 Flutter slice - targeted analyze/tests/goldens
 ```
 flutter analyze --fatal-infos lib\features\create_daret lib\features\join_daret lib\features\darets\data\daret_callable_repository.dart lib\features\shell\presentation\create_join_sheet.dart lib\core\router\router.dart test\features\create_daret test\features\join_daret
@@ -166,7 +231,7 @@ flutter test test\features\create_daret test\features\join_daret
 00:30 +8: All tests passed!
 ```
 
-### BLOCKED - local gate/codegen failure
+### Historical blocker - local gate/codegen failure (resolved by D025)
 ```
 dart run tool/verify.dart
 ...
@@ -197,51 +262,69 @@ W SDK language version 3.11.0 is newer than `analyzer` language version 3.9.0. R
 Log overflowed the console, switching to line-by-line logging.
 ```
 
-## Handoff for next agent
+## Current close-out state
 - Worktree is dirty. Pre-existing user/other-agent file: `.agent/PROGRESS_S3.md`
-  was already modified before S4 work and should not be staged unless the user
-  explicitly asks.
-- Backend S4 contract is committed as `8fd9341`. UI/tests/docs after that commit
-  are uncommitted.
-- Important uncommitted S4 files:
-  - `lib/features/create_daret/domain/create_daret_models.dart`
-  - `lib/features/create_daret/data/create_daret_repository.dart`
-  - `lib/features/create_daret/data/create_daret_providers.dart`
-  - `lib/features/create_daret/presentation/create_daret_controller.dart`
-  - `lib/features/create_daret/presentation/screens/create_daret_screen.dart`
-  - `lib/features/join_daret/presentation/screens/join_daret_screen.dart`
-  - `lib/features/join_daret/presentation/screens/approval_screen.dart`
-  - `lib/features/darets/data/daret_callable_repository.dart`
-  - `lib/features/shell/presentation/create_join_sheet.dart`
-  - `lib/core/router/router.dart`
-  - `test/features/create_daret/**`
-  - `test/features/join_daret/**`
-- Generated S4 golden baselines exist at:
+  was already modified before this close-out pass and should not be staged unless
+  the user explicitly asks.
+- S4 implementation is committed through `a3baca3`; docs-only commit `9024973`
+  is the current parent and was marked `[skip ci]`. The current staged S4
+  device-bug-fix tree corrects period-share math, adds callable auth token
+  refresh, and updates tests/docs after the fresh user-run gate passed.
+- CI evidence is **GREEN for `a3baca3`** (run 26917868600, both `verify` and
+  `backend` jobs green, confirmed by the user and pasted below). Do not claim a
+  separate CI run for `9024973` or for the current device-bug-fix tree until
+  `dart run tool/check_ci.dart` proves it.
+- Verification review found and fixed one S4 UI bug in the group split editor:
+  the open split sheet now redraws live while +/- changes shares. User-run
+  `dart run tool/verify.dart` passed after the fix.
+- Physical-device creation testing then found incorrect period-share math and
+  `[firebase_functions/unauthenticated]` on final submit. The current tree fixes
+  both locally and is covered by Flutter + Functions regression tests. The user
+  reran `dart run tool/verify.dart` and pasted `GATE: PASS` for this tree.
+- Generated S4 golden baselines are committed:
   - `test/features/create_daret/presentation/goldens/ci/s4_create_daret_wizard.png`
   - `test/features/join_daret/presentation/goldens/ci/s4_join_approval.png`
-- Last proven Flutter evidence before the codegen blocker:
-  targeted S4 analyze passed, golden update passed, and
-  `flutter test test\features\create_daret test\features\join_daret` passed
-  with 8 tests. The canonical full gate has NOT passed after S4 changes.
-- Suggested next debugging path:
-  1. Stop any leftover `dart run build_runner` process before retrying.
-  2. Decide whether to keep or revert the manual `routerProvider` change.
-  3. Resolve the analyzer mismatch. `flutter pub outdated` showed
-     `build_runner 2.15.0` and `analyzer 8.4.0` are resolvable, but Riverpod
-     runtime must stay v2 per S4 rules/D003. If upgrading dev tooling, record
-     the decision in `.agent/DECISIONS.md`, avoid `any`, and rerun the canonical
-     gate.
-  4. Only after `dart run tool/verify.dart` passes, continue with commit, deploy,
-     device E2E, push, and CI proof.
+- Device walkthrough result: **[~] BLOCKED pending post-fix device retest.** The
+  first physical create run found blockers; the fixed Functions bundle still
+  needs deployment, then the S3 regression screens and S4 create/invite/join/
+  approve flow must be rerun on device. The agent cannot run Flutter/device
+  commands in this environment and must not claim that result.
+
+## Self-review vs S4 spec (2026-06-04)
+- Wizard/spec: 5-step create flow is present (identity, money/rhythm, members, order/periods, recap),
+  with progress indicator and per-step validation. It follows `../src/create.jsx` / `../src/create_order.jsx`
+  structurally: cover/accent, amount/frequency/count, members from previous darets/fallback app users/
+  contacts-as-pending-invites, drag/drop order, group split editor, recap submit.
+- Split validation: `CreateDaretLogic.validateAssignment` enforces every period filled, every selected member
+  placed exactly once, and group shares summing to 100. The verification fix makes the open group editor
+  redraw share values/totals live while editing.
+- Plus sheet: the global "+" sheet routes "Creer un daret" and "Rejoindre avec un code" to real S4 screens.
+  The remaining SnackBars are only the debug `seedDev` action and normal error/success feedback, not route
+  stubs.
+- Do not over-ask: no per-daret rules/echeance wizard step exists. The draft records global default
+  `echeanceDay` / `graceDays` from the user's settings.
+- Write boundary: client creates only the strict `brouillon` draft root permitted by rules/D024. `startDaret`,
+  `createInvite`, `previewDaret`, `joinDaret`, and `approveDaret` go through `DaretCallableRepository`; server
+  status transitions, member docs, period docs, contributions, invites, activity, and notifications are
+  Function-owned. App Check remains OFF in dev per D022; this file does not change it.
+- Scope guards: no S5 daret hub, two-sided payment confirmation, payout, or celebration work was added.
+  Daret-card taps and the Accueil hero route still go to the read-only hub stub.
+- Goldens: S4 create/join/approval golden tests exist via `goldenTest`; baselines are committed in the S4
+  golden paths listed above.
 
 ## Blockers / questions for the user
 - [x] RESOLVED (2026-06-04, D025): the `visitDotShorthandInvocation` codegen crash was the analyzer-7.6.0
   summary linker (pinned by riverpod_generator 2.6.5) vs the Dart 3.11 ecosystem. Fixed by dropping
   riverpod codegen (manual Riverpod 2 providers) + moving the toolchain to analyzer 10. Gate now green
   (see Verification evidence). Riverpod 3 migration is logged as **S6 tech-debt**.
-- Remaining (not blockers, normal S4 close-out, need user authorization to push): commit the work, push,
-  prove CI green (`dart run tool/check_ci.dart`), deploy any cloud config, and run the Android device
-  walkthrough of the create/join/approval flows.
+- [~] BLOCKED pending post-fix device report: rerun the Android walkthrough for S3 regression reads plus S4
+  create/invite/join/approve after deploying the updated Functions bundle. Capture any runtime error,
+  overflow, callable failure, or wrong/empty data.
+- [x] RESOLVED: user ran `dart run tool/verify.dart` after the device bug fixes and pasted `GATE: PASS`.
+- [~] BLOCKED pending device retest after deploying the updated Functions bundle: creation submit must no
+  longer return `[firebase_functions/unauthenticated]`, and grouped shares must show/pay/receive correctly.
+- [~] BLOCKED pending push/CI for the device-bug-fix commit: after committing and pushing this tree, prove
+  CI green for the pushed HEAD before S4 can be signed off.
 
 ### CI proof — `dart run tool/check_ci.dart`
 ```
@@ -257,12 +340,15 @@ plus the `backend` job = Firestore/Storage rules tests + Functions Jest. Both jo
 - `8fd9341` feat(functions): expand S4 daret drafts (backend contract, prior session)
 - `587987e` fix(build): drop riverpod codegen for manual Riverpod 2 providers on analyzer 10
 - `a3baca3` feat(daret): S4 create wizard + drag-drop payout + join-by-code + approval
-- Pushed to `origin/main` (`fc4b364..a3baca3`); CI run 26917868600 = success.
+- `9024973` docs(s4): record codegen-fix gate PASS + CI green (run 26917868600) [skip ci]
+- Current uncommitted verification fix: group split sheet live-redraw fix + widget regression test.
+- Pushed to `origin/main` through `9024973`; CI run 26917868600 = success for app commit `a3baca3`
+  (docs-only `9024973` skipped CI).
 
 ## Definition of Done gate
 - [ ] Every task above is implemented and verified
-- [ ] `dart run tool/verify.dart` -> `GATE: PASS` with output pasted
-- [ ] Backend lint/tests + security-rules emulator tests pass with output pasted
+- [x] `dart run tool/verify.dart` -> `GATE: PASS` with output pasted for the current device-bug-fix tree
+- [x] Backend lint/tests + security-rules emulator tests pass with output pasted
 - [ ] CI is green for pushed commit with output pasted
 - [ ] New UI visually matches prototype and has committed goldens
 - [ ] App builds and touched flows run on Android

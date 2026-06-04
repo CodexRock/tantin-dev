@@ -313,6 +313,7 @@ async function startDaretHandler(
         currentPlan,
         memberUids,
         montant,
+        periodPlans,
       );
     }
     transaction.set(
@@ -328,7 +329,7 @@ async function startDaretHandler(
     transaction.update(daretRef, {
       statut: nextStatus,
       memberUids,
-      cagnotteParPeriode: montant * memberUids.length,
+      cagnotteParPeriode: grossCagnotteAmount(montant, periodesCount),
       currentPeriode: 1,
       prochaineDate: currentPlan.scheduledDate,
       startedAt: nextStatus === 'actif' ? now : null,
@@ -537,8 +538,12 @@ async function approveDaretHandler(
     if (currentPeriode !== 1) {
       fail('failed-precondition', 'Pending darets must start at period 1.');
     }
-    const currentPeriodSnapshot = await transaction.get(daretRef.collection('periods').doc('01'));
-    const currentPlan = readPeriodPlan(requiredDoc(currentPeriodSnapshot, 'period'));
+    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    const periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
+    const currentPlan = periodPlans.find((plan) => plan.index === 1);
+    if (currentPlan === undefined) {
+      fail('failed-precondition', 'Period 1 is missing.');
+    }
     transaction.update(memberRef, {approvalStatus: 'approved'});
     setContributionsInTransaction(
       transaction,
@@ -546,6 +551,7 @@ async function approveDaretHandler(
       currentPlan,
       requireStringArray(daret, 'memberUids'),
       requirePositiveInteger(daret, 'montant'),
+      periodPlans,
     );
     transaction.update(daretRef, {statut: 'actif', startedAt: now, updatedAt: now});
     transaction.update(daretRef.collection('periods').doc('01'), {status: 'current'});
@@ -605,8 +611,12 @@ async function closePeriodCore(
     }
 
     const periodRef = daretRef.collection('periods').doc(currentPeriodId);
-    const periodSnapshot = await transaction.get(periodRef);
-    const currentPlan = readPeriodPlan(requiredDoc(periodSnapshot, 'period'));
+    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    const periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
+    const currentPlan = periodPlans.find((plan) => plan.index === input.periodIndex);
+    if (currentPlan === undefined) {
+      fail('failed-precondition', 'Current period is missing.');
+    }
     if (currentPlan.status !== 'current') {
       fail('failed-precondition', 'Only the current period can be closed.');
     }
@@ -629,7 +639,7 @@ async function closePeriodCore(
       totalCount: contributionCounts.totalCount,
       closedAt: now,
     });
-    incrementRecipientStats(transaction, db, currentPlan, requirePositiveInteger(daret, 'montant'));
+    incrementRecipientStats(transaction, db, currentPlan);
 
     if (input.periodIndex >= periodesCount) {
       transaction.update(daretRef, {
@@ -662,6 +672,7 @@ async function closePeriodCore(
       nextPlan,
       requireStringArray(daret, 'memberUids'),
       requirePositiveInteger(daret, 'montant'),
+      periodPlans,
     );
     transaction.update(daretRef, {
       currentPeriode: nextIndex,
@@ -1129,7 +1140,7 @@ function readDraftPeriodPlans(
   const startDate = optionalTimestamp(daret, 'prochaineDate') ?? now;
   const frequence = requireString(daret, 'frequence');
   const montant = requirePositiveInteger(daret, 'montant');
-  const draftMembersCount = requireRecordArray(daret, 'draftMembers').length;
+  const periodesCount = requirePositiveInteger(daret, 'periodesCount');
   return draftPeriods.map((period) => {
     const index = requirePositiveInteger(period, 'index');
     return {
@@ -1138,7 +1149,7 @@ function readDraftPeriodPlans(
       recipientUids: requireStringArray(period, 'recipientUids'),
       shares: requireNumberMap(period, 'shares'),
       scheduledDate: scheduleDate(startDate, frequence, index - 1),
-      potAmount: montant * draftMembersCount,
+      potAmount: payoutFromOtherSharesAmount(montant, periodesCount),
       status: 'upcoming',
     };
   });
@@ -1194,7 +1205,7 @@ function buildDefaultPeriods(
       recipientUids: [recipientUid],
       shares: {[recipientUid]: 100},
       scheduledDate: scheduleDate(startDate, frequence, index - 1),
-      potAmount: montant * memberUids.length,
+      potAmount: payoutFromOtherSharesAmount(montant, periodesCount),
       status: 'upcoming',
     });
   }
@@ -1274,6 +1285,7 @@ function setContributionsInTransaction(
   period: PeriodPlan,
   memberUids: string[],
   amount: number,
+  periodPlans: PeriodPlan[],
 ): void {
   const recipientSet = new Set(period.recipientUids);
   const counts = {paidCount: 0, totalCount: 0};
@@ -1284,7 +1296,11 @@ function setContributionsInTransaction(
     }
     transaction.set(
       daretRef.collection('periods').doc(period.id).collection('contributions').doc(uid),
-      contributionDocument(uid, isRecipient ? 'recipient' : 'apayer', isRecipient ? 0 : amount),
+      contributionDocument(
+        uid,
+        isRecipient ? 'recipient' : 'apayer',
+        isRecipient ? 0 : contributionAmountForMember(uid, amount, periodPlans),
+      ),
       {merge: false},
     );
   }
@@ -1295,25 +1311,42 @@ function setContributionsInTransaction(
   );
 }
 
-function incrementRecipientStats(
-  transaction: Transaction,
-  db: Firestore,
-  period: PeriodPlan,
-  amount: number,
-): void {
+function incrementRecipientStats(transaction: Transaction, db: Firestore, period: PeriodPlan): void {
   for (const uid of period.recipientUids) {
     const share = period.shares[uid] ?? 0;
     transaction.set(
       db.collection('users').doc(uid),
       {
         stats: {
-          totalRecuVie: FieldValue.increment(Math.round(amount * share / 100)),
+          totalRecuVie: FieldValue.increment(amountForShare(period.potAmount, share)),
         },
         updatedAt: Timestamp.now(),
       },
       {merge: true},
     );
   }
+}
+
+function grossCagnotteAmount(amount: number, periodesCount: number): number {
+  return amount * periodesCount;
+}
+
+function payoutFromOtherSharesAmount(amount: number, periodesCount: number): number {
+  return amount * Math.max(periodesCount - 1, 0);
+}
+
+function contributionAmountForMember(uid: string, amount: number, periodPlans: PeriodPlan[]): number {
+  for (const plan of periodPlans) {
+    const share = plan.shares[uid];
+    if (share !== undefined) {
+      return amountForShare(amount, share);
+    }
+  }
+  fail('failed-precondition', 'Every member must have a contribution share.');
+}
+
+function amountForShare(amount: number, share: number): number {
+  return Math.round((amount * share) / 100);
 }
 
 function countContributions(contributions: FirestoreData[]): {paidCount: number; totalCount: number} {
@@ -1845,7 +1878,7 @@ function buildSeedDaret(input: {
     montant: input.montant,
     frequence: input.frequence,
     periodesCount: input.periodesCount,
-    cagnotteParPeriode: input.montant * memberUids.length,
+    cagnotteParPeriode: grossCagnotteAmount(input.montant, input.periodesCount),
     statut: input.statut,
     adminUid: admin.uid,
     memberUids,
@@ -1878,7 +1911,7 @@ function buildSeedDaret(input: {
       recipientUids: recipients.map((person) => person.uid),
       shares,
       scheduledDate: ts(input.dates[zeroBasedIndex] ?? input.dates[0] ?? '2026-06-05T00:00:00Z'),
-      potAmount: input.montant * memberUids.length,
+      potAmount: payoutFromOtherSharesAmount(input.montant, input.periodesCount),
       status,
     };
     const contributions = buildSeedContributions(input, plan, memberUids, input.peopleById);
@@ -1903,6 +1936,7 @@ function buildSeedContributions(
     statut: DaretStatus;
     currentStates: Map<number, ContributionState>;
     memberIds: number[];
+    order: number[][];
   },
   plan: PeriodPlan,
   memberUids: string[],
@@ -1925,13 +1959,35 @@ function buildSeedContributions(
     if (plan.status === 'current') {
       state = currentIdToState.get(uid) ?? state;
     }
-    const amount = isRecipient ? 0 : input.montant;
+    const amount = isRecipient
+      ? 0
+      : amountForShare(input.montant, seedMemberShare(uid, input.memberIds, input.order, peopleById));
     return contributionDocument(uid, state, amount, {
       paidDeclaredAt: state === 'attente' || state === 'confirme' ? plan.scheduledDate : null,
       confirmedAt: state === 'confirme' ? plan.scheduledDate : null,
       confirmedByUid: state === 'confirme' ? plan.recipientUids[0] ?? null : null,
     });
   });
+}
+
+function seedMemberShare(
+  uid: string,
+  memberIds: number[],
+  order: number[][],
+  peopleById: Map<number, SeedPerson>,
+): number {
+  for (const recipientIds of order) {
+    const recipients = recipientIds.map((id) => requireSeedPerson(peopleById, id));
+    const shares = equalShares(recipients.map((person) => person.uid));
+    const share = shares[uid];
+    if (share !== undefined) {
+      return share;
+    }
+  }
+  if (memberIds.some((id) => requireSeedPerson(peopleById, id).uid === uid)) {
+    fail('internal', `Seed member ${uid} is not assigned to a period.`);
+  }
+  fail('internal', `Unknown seed member ${uid}.`);
 }
 
 function periodSeedStatus(daretStatus: DaretStatus, index: number, currentPeriode: number): PeriodStatus {

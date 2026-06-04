@@ -6,5 +6,8 @@ import 'package:tantin_flutter/features/darets/data/daret_callable_repository.da
 
 final AutoDisposeProvider<DaretCallableRepository>
 daretCallableRepositoryProvider = Provider.autoDispose<DaretCallableRepository>(
-  (ref) => DaretCallableRepository(ref.watch(firebaseFunctionsProvider)),
+  (ref) => DaretCallableRepository(
+    ref.watch(firebaseFunctionsProvider),
+    ref.watch(firebaseAuthProvider),
+  ),
 );

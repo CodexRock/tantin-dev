@@ -817,7 +817,7 @@ class _OrderStep extends StatelessWidget {
               return _PeriodSlot(
                 slot: slot,
                 date: dates[index],
-                potAmount: state.cagnotteParPeriode,
+                potAmount: state.payoutParPeriode,
                 participants: state.participants,
                 onDrop: (uid) => controller.placeParticipant(uid, index),
                 onRemove: controller.removeFromSlot,
@@ -912,21 +912,29 @@ class _OrderStep extends StatelessWidget {
   }
 
   Future<void> _showGroupEditor(BuildContext context, int index) {
-    final slot = state.slots[index];
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (context) {
-        return _GroupEditorSheet(
-          slot: slot,
-          participants: state.participants,
-          potAmount: state.cagnotteParPeriode,
-          onShareChanged: (uid, value) => controller.setGroupShare(
-            slotIndex: index,
-            uid: uid,
-            value: value,
-          ),
+        return Consumer(
+          builder: (context, ref, child) {
+            final currentState = ref.watch(createDaretControllerProvider);
+            final currentController = ref.read(
+              createDaretControllerProvider.notifier,
+            );
+            final slot = currentState.slots[index];
+            return _GroupEditorSheet(
+              slot: slot,
+              participants: currentState.participants,
+              potAmount: currentState.payoutParPeriode,
+              onShareChanged: (uid, value) => currentController.setGroupShare(
+                slotIndex: index,
+                uid: uid,
+                value: value,
+              ),
+            );
+          },
         );
       },
     );
@@ -1402,7 +1410,7 @@ class _GroupEditorSheet extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Le groupe se répartit la cagnotte de '
+            'Le groupe se répartit le versement des autres parts : '
             '${TantinFormat.fmtDH(potAmount)}. Les parts doivent totaliser '
             '100 %.',
             style: const TextStyle(
