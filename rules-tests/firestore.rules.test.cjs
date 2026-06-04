@@ -324,12 +324,31 @@ describe('contributions', () => {
     );
   });
 
+  test('non-payer member cannot declare someone else paid', async () => {
+    await assertFails(
+      updateDoc(doc(db('admin'), 'darets/d1/periods/01/contributions/payer'), {
+        state: 'attente',
+        paidDeclaredAt: serverTimestamp(),
+      }),
+    );
+  });
+
   test('payer cannot mutate amount while declaring paid', async () => {
     await assertFails(
       updateDoc(doc(db('payer'), 'darets/d1/periods/01/contributions/payer'), {
         state: 'attente',
         amount: 1,
         paidDeclaredAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('declaration cannot smuggle extra fields', async () => {
+    await assertFails(
+      updateDoc(doc(db('payer'), 'darets/d1/periods/01/contributions/payer'), {
+        state: 'attente',
+        paidDeclaredAt: serverTimestamp(),
+        clientNote: 'forged',
       }),
     );
   });
@@ -351,6 +370,25 @@ describe('contributions', () => {
     );
   });
 
+  test('confirmation cannot mutate amount or smuggle extra fields', async () => {
+    await assertFails(
+      updateDoc(doc(db('recipient'), 'darets/d1/periods/01/contributions/admin'), {
+        state: 'confirme',
+        amount: 1,
+        confirmedAt: serverTimestamp(),
+        confirmedByUid: 'recipient',
+      }),
+    );
+    await assertFails(
+      updateDoc(doc(db('recipient'), 'darets/d1/periods/01/contributions/admin'), {
+        state: 'confirme',
+        confirmedAt: serverTimestamp(),
+        confirmedByUid: 'recipient',
+        clientNote: 'forged',
+      }),
+    );
+  });
+
   test('admin can direct-confirm on behalf but ordinary member cannot', async () => {
     await assertSucceeds(
       updateDoc(doc(db('admin'), 'darets/d1/periods/01/contributions/payer'), {
@@ -366,6 +404,13 @@ describe('contributions', () => {
         confirmedByUid: 'payer',
       }),
     );
+  });
+
+  test('client cannot write period status or aggregates', async () => {
+    const periodRef = doc(db('admin'), 'darets/d1/periods/01');
+    await assertFails(updateDoc(periodRef, { status: 'closed' }));
+    await assertFails(updateDoc(periodRef, { paidCount: 2 }));
+    await assertFails(updateDoc(periodRef, { totalCount: 3 }));
   });
 });
 

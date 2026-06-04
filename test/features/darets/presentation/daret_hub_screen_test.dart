@@ -21,6 +21,16 @@ const _user = AppUser(
   avatarPalette: ['#5247E6', '#E7E5FB'],
 );
 
+const _payerUser = AppUser(
+  uid: 'karim',
+  prenom: 'Karim',
+  nom: '',
+  name: 'Karim',
+  initials: 'K',
+  phone: '+212611111111',
+  avatarPalette: ['#F5A623', '#FBEFD6'],
+);
+
 final _daret = Daret(
   id: _daretId,
   nom: 'Daret Famille',
@@ -160,7 +170,7 @@ void main() {
     expect(find.text("C'est votre tour !"), findsOneWidget);
     expect(find.text('1/3 ont payé'), findsOneWidget);
     expect(find.text('Relancer'), findsOneWidget);
-    expect(find.text('Reçu'), findsOneWidget);
+    expect(find.text('Reçu'), findsNWidgets(2));
 
     await tester.tap(find.text('Périodes'));
     await tester.pumpAndSettle();
@@ -176,12 +186,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('a confirmé le paiement de Reda'), findsOneWidget);
   });
+
+  testWidgets('opens payer confirmation sheet', (tester) async {
+    await tester.pumpWidget(_host(user: _payerUser));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text("J'ai payé ma part"));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirmer votre paiement'), findsOneWidget);
+    expect(
+      find.textContaining("Tant'in ne traite pas d'argent"),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('opens received confirmation sheet', (tester) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Reçu').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirmer la réception'), findsOneWidget);
+    expect(find.textContaining('Validation admin'), findsOneWidget);
+  });
 }
 
-Widget _host() {
+Widget _host({AppUser user = _user}) {
   return ProviderScope(
     overrides: [
-      currentAppUserProvider.overrideWith((ref) => Stream.value(_user)),
+      currentAppUserProvider.overrideWith((ref) => Stream.value(user)),
       daretProvider(_daretId).overrideWith((ref) => Stream.value(_daret)),
       daretMembersProvider(_daretId).overrideWith(
         (ref) => Stream.value(_members),

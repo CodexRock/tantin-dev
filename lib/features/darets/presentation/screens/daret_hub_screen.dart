@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,12 +11,15 @@ import 'package:tantin_flutter/core/theme/tokens.dart';
 import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/features/activity/data/activity_providers.dart';
 import 'package:tantin_flutter/features/activity/domain/activity_event.dart';
+import 'package:tantin_flutter/features/darets/data/daret_callable_providers.dart';
 import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_logic.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
 import 'package:tantin_flutter/features/profile/data/user_providers.dart';
 
 enum _HubTab { courant, periodes, membres, activite }
+
+typedef _ContributionAction = void Function(Contribution contribution);
 
 class DaretHubScreen extends ConsumerStatefulWidget {
   const DaretHubScreen({required this.daretId, super.key});
@@ -27,6 +32,8 @@ class DaretHubScreen extends ConsumerStatefulWidget {
 
 class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
   _HubTab _tab = _HubTab.courant;
+  final Map<String, ContributionState> _optimisticStates = {};
+  final Set<String> _busyKeys = {};
 
   @override
   Widget build(BuildContext context) {
@@ -64,13 +71,15 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final periods =
         ref.watch(periodsProvider(daret.id)).valueOrNull ??
         const <DaretPeriod>[];
-    final contributions =
-        ref
-            .watch(
-              currentContributionsProvider((daret.id, daret.currentPeriode)),
-            )
-            .valueOrNull ??
-        const <Contribution>[];
+    final contributions = _withOptimisticStates(
+      daret.currentPeriode,
+      ref
+              .watch(
+                currentContributionsProvider((daret.id, daret.currentPeriode)),
+              )
+              .valueOrNull ??
+          const <Contribution>[],
+    );
     final activity =
         ref.watch(activityProvider(daret.id)).valueOrNull ??
         const <ActivityEvent>[];
@@ -99,7 +108,7 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                 context.go('/darets');
               }
             },
-            onHeaderAction: () => _showPartTwoSnack(context),
+            onHeaderAction: null,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 0),
@@ -132,7 +141,44 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                     currentUid: uid,
                     isAdmin: isAdmin,
                     accent: accent,
-                    onAction: () => _showPartTwoSnack(context),
+                    busyKeys: _busyKeys,
+                    onDeclarePaid: (contribution) {
+                      if (currentPeriod == null) return;
+                      unawaited(
+                        _handleDeclarePaid(
+                          daret: daret,
+                          period: currentPeriod,
+                          contribution: contribution,
+                        ),
+                      );
+                    },
+                    onConfirmReceived: (contribution) {
+                      if (currentPeriod == null || uid == null) return;
+                      unawaited(
+                        _handleConfirmReceived(
+                          daret: daret,
+                          period: currentPeriod,
+                          contribution: contribution,
+                          payer: membersByUid[contribution.payerUid],
+                          confirmerUid: uid,
+                          adminDirectConfirm:
+                              isAdmin &&
+                              contribution.state != ContributionState.attente,
+                        ),
+                      );
+                    },
+                    onSendNudge: (contribution) {
+                      if (currentPeriod == null) return;
+                      unawaited(
+                        _handleSendNudge(
+                          daret: daret,
+                          period: currentPeriod,
+                          contribution: contribution,
+                          payer: membersByUid[contribution.payerUid],
+                        ),
+                      );
+                    },
+                    onAdvancePeriod: () => _handleAdvancePeriod(daret),
                   ),
                   _HubTab.periodes => _PeriodsTimelineTab(
                     daret: daret,
@@ -162,11 +208,478 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     );
   }
 
-  void _showPartTwoSnack(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Le flux de confirmation sera câblé au checkpoint Part 2.',
+  List<Contribution> _withOptimisticStates(
+    int periodIndex,
+    List<Contribution> contributions,
+  ) {
+    return [
+      for (final contribution in contributions)
+        if (_optimisticStates[_contributionKey(
+              periodIndex,
+              contribution.payerUid,
+            )]
+            case final state?)
+          contribution.copyWith(state: state)
+        else
+          contribution,
+    ];
+  }
+
+  Future<void> _handleDeclarePaid({
+    required Daret daret,
+    required DaretPeriod period,
+    required Contribution contribution,
+  }) async {
+    final confirmed = await _showConfirmPaySheet(
+      context,
+      daret: daret,
+      contribution: contribution,
+    );
+    if (confirmed != true || !mounted) return;
+
+    final key = _contributionKey(period.index, contribution.payerUid);
+    await _runHubAction(
+      busyKey: key,
+      optimisticKey: key,
+      optimisticState: ContributionState.attente,
+      successMessage: 'Marqué comme payé - en attente de confirmation',
+      failurePrefix: 'Paiement impossible',
+      action: () => ref
+          .read(daretRepositoryProvider)
+          .declarePaid(
+            daretId: daret.id,
+            periodIndex: period.index,
+            payerUid: contribution.payerUid,
+          ),
+    );
+  }
+
+  Future<void> _handleConfirmReceived({
+    required Daret daret,
+    required DaretPeriod period,
+    required Contribution contribution,
+    required DaretMember? payer,
+    required String confirmerUid,
+    required bool adminDirectConfirm,
+  }) async {
+    final confirmed = await _showReceivedSheet(
+      context,
+      daret: daret,
+      contribution: contribution,
+      payer: payer,
+      adminDirectConfirm: adminDirectConfirm,
+    );
+    if (confirmed != true || !mounted) return;
+
+    final key = _contributionKey(period.index, contribution.payerUid);
+    await _runHubAction(
+      busyKey: key,
+      optimisticKey: key,
+      optimisticState: ContributionState.confirme,
+      successMessage: 'Paiement confirmé pour ${payer?.prenom ?? 'ce membre'}',
+      failurePrefix: 'Confirmation impossible',
+      action: () => ref
+          .read(daretRepositoryProvider)
+          .confirmReceived(
+            daretId: daret.id,
+            periodIndex: period.index,
+            payerUid: contribution.payerUid,
+            confirmedByUid: confirmerUid,
+          ),
+    );
+  }
+
+  Future<void> _handleSendNudge({
+    required Daret daret,
+    required DaretPeriod period,
+    required Contribution contribution,
+    required DaretMember? payer,
+  }) async {
+    await _runHubAction(
+      busyKey: _nudgeKey(period.index, contribution.payerUid),
+      successMessage: 'Rappel envoyé à ${payer?.prenom ?? 'ce membre'}',
+      failurePrefix: 'Rappel impossible',
+      action: () => ref
+          .read(daretCallableRepositoryProvider)
+          .sendNudge(
+            daretId: daret.id,
+            periodIndex: period.index,
+            targetUid: contribution.payerUid,
+          ),
+    );
+  }
+
+  Future<void> _handleAdvancePeriod(Daret daret) async {
+    await _runHubAction(
+      busyKey: _advanceKey(daret.id),
+      successMessage: 'Période clôturée - tour suivant',
+      failurePrefix: 'Passage au tour suivant impossible',
+      action: () =>
+          ref.read(daretCallableRepositoryProvider).advancePeriod(daret.id),
+    );
+  }
+
+  Future<void> _runHubAction({
+    required String busyKey,
+    required String successMessage,
+    required String failurePrefix,
+    required Future<void> Function() action,
+    String? optimisticKey,
+    ContributionState? optimisticState,
+  }) async {
+    if (_busyKeys.contains(busyKey)) return;
+
+    setState(() {
+      _busyKeys.add(busyKey);
+      if (optimisticKey != null && optimisticState != null) {
+        _optimisticStates[optimisticKey] = optimisticState;
+      }
+    });
+
+    try {
+      await action();
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyKeys.remove(busyKey);
+        if (optimisticKey != null) _optimisticStates.remove(optimisticKey);
+      });
+      _showSnack('$failurePrefix : $error');
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _busyKeys.remove(busyKey);
+      if (optimisticKey != null) _optimisticStates.remove(optimisticKey);
+    });
+    _showSnack(successMessage);
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+Future<bool?> _showConfirmPaySheet(
+  BuildContext context, {
+  required Daret daret,
+  required Contribution contribution,
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ConfirmPaySheet(
+      daret: daret,
+      contribution: contribution,
+    ),
+  );
+}
+
+Future<bool?> _showReceivedSheet(
+  BuildContext context, {
+  required Daret daret,
+  required Contribution contribution,
+  required DaretMember? payer,
+  required bool adminDirectConfirm,
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ReceivedSheet(
+      daret: daret,
+      contribution: contribution,
+      payer: payer,
+      adminDirectConfirm: adminDirectConfirm,
+    ),
+  );
+}
+
+class _ConfirmPaySheet extends StatelessWidget {
+  const _ConfirmPaySheet({
+    required this.daret,
+    required this.contribution,
+  });
+
+  final Daret daret;
+  final Contribution contribution;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.majorelleSoft,
+            child: TnIcons.shield(size: 30, color: TantinColors.majorelle),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Confirmer votre paiement',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text.rich(
+            TextSpan(
+              text: 'Vous confirmez avoir versé ',
+              children: [
+                TextSpan(
+                  text: TantinFormat.fmtDH(contribution.amount),
+                  style: const TextStyle(
+                    color: TantinColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const TextSpan(text: ' au bénéficiaire de '),
+                TextSpan(
+                  text: daret.nom,
+                  style: const TextStyle(
+                    color: TantinColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const TextSpan(text: '.'),
+              ],
+            ),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const _TrustNotice(
+            text:
+                "Tant'in ne traite pas d'argent. "
+                'Le bénéficiaire confirmera la réception.',
+          ),
+          const SizedBox(height: 18),
+          TnButton(
+            full: true,
+            variant: ButtonVariant.saffron,
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text("J'ai payé ma part"),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReceivedSheet extends StatelessWidget {
+  const _ReceivedSheet({
+    required this.daret,
+    required this.contribution,
+    required this.payer,
+    required this.adminDirectConfirm,
+  });
+
+  final Daret daret;
+  final Contribution contribution;
+  final DaretMember? payer;
+  final bool adminDirectConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final payerName = payer?.prenom ?? 'ce membre';
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.success.withValues(alpha: 0.12),
+            child: TnIcons.checkCircle(size: 31, color: TantinColors.success),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Confirmer la réception',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text.rich(
+            TextSpan(
+              text: 'Vous confirmez avoir reçu ',
+              children: [
+                TextSpan(
+                  text: TantinFormat.fmtDH(contribution.amount),
+                  style: const TextStyle(
+                    color: TantinColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                TextSpan(text: ' de $payerName pour '),
+                TextSpan(
+                  text: daret.nom,
+                  style: const TextStyle(
+                    color: TantinColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const TextSpan(text: '.'),
+              ],
+            ),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _TrustNotice(
+            text: adminDirectConfirm
+                ? 'Validation admin : cette action confirme directement ce '
+                      'paiement dans le suivi du daret.'
+                : 'Cette confirmation sert uniquement au suivi de confiance. '
+                      "Tant'in ne déplace jamais d'argent.",
+          ),
+          const SizedBox(height: 18),
+          TnButton(
+            full: true,
+            icon: TnIcons.check(size: 18, color: Colors.white),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reçu'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionSheetShell extends StatelessWidget {
+  const _ActionSheetShell({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 20 + bottom),
+      decoration: const BoxDecoration(
+        color: TantinColors.ivorySurface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 5,
+              margin: const EdgeInsets.only(top: 4, bottom: 14),
+              decoration: BoxDecoration(
+                color: TantinColors.ivorySunken,
+                borderRadius: BorderRadius.circular(5),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _SheetHeroIcon extends StatelessWidget {
+  const _SheetHeroIcon({required this.background, required this.child});
+
+  final Color background;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 64,
+        height: 64,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _TrustNotice extends StatelessWidget {
+  const _TrustNotice({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: TantinColors.ivorySunken,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          TnIcons.info(size: 26, color: TantinColors.inkMuted),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: TantinColors.inkMuted,
+                fontSize: 13,
+                height: 1.4,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CancelSheetButton extends StatelessWidget {
+  const _CancelSheetButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onPressed: onPressed,
+      child: const Padding(
+        padding: EdgeInsets.all(10),
+        child: Text(
+          'Annuler',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: TantinColors.inkMuted,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -190,7 +703,7 @@ class _HubHeader extends StatelessWidget {
   final Color accent;
   final bool isAdmin;
   final VoidCallback onBack;
-  final VoidCallback onHeaderAction;
+  final VoidCallback? onHeaderAction;
 
   @override
   Widget build(BuildContext context) {
@@ -348,22 +861,25 @@ class _HubHeader extends StatelessWidget {
 class _HeaderIconButton extends StatelessWidget {
   const _HeaderIconButton({required this.onPressed, required this.child});
 
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onPressed: onPressed,
-      child: Container(
-        width: 40,
-        height: 40,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(13),
+    return Opacity(
+      opacity: onPressed == null ? 0.52 : 1,
+      child: Pressable(
+        onPressed: onPressed,
+        child: Container(
+          width: 40,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: child,
         ),
-        child: child,
       ),
     );
   }
@@ -417,7 +933,11 @@ class _CurrentPeriodTab extends StatelessWidget {
     required this.currentUid,
     required this.isAdmin,
     required this.accent,
-    required this.onAction,
+    required this.busyKeys,
+    required this.onDeclarePaid,
+    required this.onConfirmReceived,
+    required this.onSendNudge,
+    required this.onAdvancePeriod,
   });
 
   final Daret daret;
@@ -427,7 +947,11 @@ class _CurrentPeriodTab extends StatelessWidget {
   final String? currentUid;
   final bool isAdmin;
   final Color accent;
-  final VoidCallback onAction;
+  final Set<String> busyKeys;
+  final _ContributionAction onDeclarePaid;
+  final _ContributionAction onConfirmReceived;
+  final _ContributionAction onSendNudge;
+  final VoidCallback onAdvancePeriod;
 
   @override
   Widget build(BuildContext context) {
@@ -442,6 +966,8 @@ class _CurrentPeriodTab extends StatelessWidget {
     final iAmRecipient =
         currentUid != null && recipientUids.contains(currentUid);
     final progress = periodProgress(contributions);
+    final allIn =
+        progress.totalCount > 0 && progress.paidCount >= progress.totalCount;
     final myContribution = currentUid == null
         ? null
         : contributions.firstWhereOrNull(
@@ -476,12 +1002,32 @@ class _CurrentPeriodTab extends StatelessWidget {
             daret: daret,
             contribution: myContribution,
             iAmRecipient: iAmRecipient,
+            isAdmin: isAdmin,
             progress: progress,
-            onAction: onAction,
+            busy:
+                myContribution != null &&
+                busyKeys.contains(
+                  _contributionKey(
+                    currentPeriod!.index,
+                    myContribution.payerUid,
+                  ),
+                ),
+            advanceBusy: busyKeys.contains(_advanceKey(daret.id)),
+            onDeclarePaid: myContribution == null
+                ? null
+                : () => onDeclarePaid(myContribution),
+            onAdvancePeriod: onAdvancePeriod,
           ),
           const SizedBox(height: 18),
         ],
         _ProgressSummary(progress: progress),
+        if (!iAmRecipient && isAdmin && allIn) ...[
+          const SizedBox(height: 12),
+          _AdvancePeriodBanner(
+            busy: busyKeys.contains(_advanceKey(daret.id)),
+            onAdvancePeriod: onAdvancePeriod,
+          ),
+        ],
         const SizedBox(height: 12),
         if (contributors.isEmpty)
           const EmptyBlock(
@@ -496,9 +1042,31 @@ class _CurrentPeriodTab extends StatelessWidget {
                   contribution: contributors[index],
                   member: membersByUid[contributors[index].payerUid],
                   isMe: contributors[index].payerUid == currentUid,
-                  canConfirm: iAmRecipient || isAdmin,
+                  canConfirm:
+                      (contributors[index].state == ContributionState.attente &&
+                          (iAmRecipient || isAdmin)) ||
+                      (isAdmin &&
+                          {
+                            ContributionState.apayer,
+                            ContributionState.retard,
+                          }.contains(contributors[index].state)),
                   canNudge: iAmRecipient || isAdmin,
-                  onAction: onAction,
+                  writeBusy: busyKeys.contains(
+                    _contributionKey(
+                      currentPeriod!.index,
+                      contributors[index].payerUid,
+                    ),
+                  ),
+                  nudgeBusy: busyKeys.contains(
+                    _nudgeKey(
+                      currentPeriod!.index,
+                      contributors[index].payerUid,
+                    ),
+                  ),
+                  onDeclarePaid: () => onDeclarePaid(contributors[index]),
+                  onConfirmReceived: () =>
+                      onConfirmReceived(contributors[index]),
+                  onSendNudge: () => onSendNudge(contributors[index]),
                 ),
                 if (index != contributors.length - 1) const SizedBox(height: 7),
               ],
@@ -630,15 +1198,23 @@ class _MyActionBanner extends StatelessWidget {
     required this.daret,
     required this.contribution,
     required this.iAmRecipient,
+    required this.isAdmin,
     required this.progress,
-    required this.onAction,
+    required this.busy,
+    required this.advanceBusy,
+    required this.onDeclarePaid,
+    required this.onAdvancePeriod,
   });
 
   final Daret daret;
   final Contribution? contribution;
   final bool iAmRecipient;
+  final bool isAdmin;
   final PeriodProgress progress;
-  final VoidCallback onAction;
+  final bool busy;
+  final bool advanceBusy;
+  final VoidCallback? onDeclarePaid;
+  final VoidCallback onAdvancePeriod;
 
   @override
   Widget build(BuildContext context) {
@@ -651,11 +1227,14 @@ class _MyActionBanner extends StatelessWidget {
         icon: TnIcons.gift(size: 22, color: Colors.white),
         title: allIn ? 'Tout est confirmé' : "C'est votre tour !",
         body: allIn
-            ? 'La période peut être clôturée par l’admin.'
+            ? (isAdmin
+                  ? 'Vous pouvez passer au tour suivant.'
+                  : 'La période peut être clôturée par l’admin.')
             : 'Confirmez les paiements reçus ci-dessous.',
-        actionLabel: 'Voir',
+        actionLabel: allIn && isAdmin ? 'Tour suivant' : null,
         actionColor: TantinColors.majorelle,
-        onAction: onAction,
+        onAction: allIn && isAdmin && !advanceBusy ? onAdvancePeriod : null,
+        busy: advanceBusy,
       );
     }
 
@@ -684,7 +1263,8 @@ class _MyActionBanner extends StatelessWidget {
         actionLabel: "J'ai payé ma part",
         actionColor: TantinColors.saffron,
         actionTextColor: const Color(0xFF2A1B05),
-        onAction: onAction,
+        onAction: busy ? null : onDeclarePaid,
+        busy: busy,
       );
     }
 
@@ -724,6 +1304,7 @@ class _BannerShell extends StatelessWidget {
     this.actionTextColor = Colors.white,
     this.onAction,
     this.border = false,
+    this.busy = false,
   });
 
   final Color background;
@@ -736,6 +1317,7 @@ class _BannerShell extends StatelessWidget {
   final Color actionTextColor;
   final VoidCallback? onAction;
   final bool border;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -784,17 +1366,43 @@ class _BannerShell extends StatelessWidget {
               ],
             ),
           ),
-          if (actionLabel != null && onAction != null) ...[
+          if (actionLabel != null) ...[
             const SizedBox(width: 10),
             _TinyButton(
               label: actionLabel!,
               background: actionColor ?? TantinColors.majorelle,
               foreground: actionTextColor,
-              onPressed: onAction!,
+              onPressed: onAction,
+              busy: busy,
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+class _AdvancePeriodBanner extends StatelessWidget {
+  const _AdvancePeriodBanner({
+    required this.busy,
+    required this.onAdvancePeriod,
+  });
+
+  final bool busy;
+  final VoidCallback onAdvancePeriod;
+
+  @override
+  Widget build(BuildContext context) {
+    return _BannerShell(
+      background: TantinColors.success.withValues(alpha: 0.1),
+      iconBg: TantinColors.success.withValues(alpha: 0.12),
+      icon: TnIcons.checkCircle(size: 22, color: TantinColors.success),
+      title: 'Tous les paiements sont confirmés',
+      body: 'Clôturez ce tour pour afficher la nouvelle période.',
+      actionLabel: 'Tour suivant',
+      actionColor: TantinColors.success,
+      onAction: busy ? null : onAdvancePeriod,
+      busy: busy,
     );
   }
 }
@@ -859,7 +1467,11 @@ class _ContributionRow extends StatelessWidget {
     required this.isMe,
     required this.canConfirm,
     required this.canNudge,
-    required this.onAction,
+    required this.writeBusy,
+    required this.nudgeBusy,
+    required this.onDeclarePaid,
+    required this.onConfirmReceived,
+    required this.onSendNudge,
   });
 
   final Contribution contribution;
@@ -867,50 +1479,67 @@ class _ContributionRow extends StatelessWidget {
   final bool isMe;
   final bool canConfirm;
   final bool canNudge;
-  final VoidCallback onAction;
+  final bool writeBusy;
+  final bool nudgeBusy;
+  final VoidCallback onDeclarePaid;
+  final VoidCallback onConfirmReceived;
+  final VoidCallback onSendNudge;
 
   @override
   Widget build(BuildContext context) {
     final name = member?.name ?? contribution.payerUid;
     final firstName = member?.prenom ?? name;
     final state = contribution.state;
-    Widget? action;
+    final actions = <Widget>[];
 
     if (isMe &&
         (state == ContributionState.apayer ||
             state == ContributionState.retard)) {
-      action = _TinyButton(
-        label: "J'ai payé",
-        background: TantinColors.saffron,
-        foreground: const Color(0xFF2A1B05),
-        onPressed: onAction,
+      actions.add(
+        _TinyButton(
+          label: "J'ai payé",
+          background: TantinColors.saffron,
+          foreground: const Color(0xFF2A1B05),
+          onPressed: writeBusy ? null : onDeclarePaid,
+          busy: writeBusy,
+        ),
       );
-    } else if (state == ContributionState.attente && canConfirm) {
-      action = _TinyButton(
-        label: 'Reçu',
-        icon: TnIcons.check(size: 15, color: Colors.white, strokeWidth: 2.6),
-        background: TantinColors.success,
-        foreground: Colors.white,
-        onPressed: onAction,
+    } else if (canConfirm) {
+      actions.add(
+        _TinyButton(
+          label: 'Reçu',
+          icon: TnIcons.check(size: 15, color: Colors.white, strokeWidth: 2.6),
+          background: TantinColors.success,
+          foreground: Colors.white,
+          onPressed: writeBusy ? null : onConfirmReceived,
+          busy: writeBusy,
+        ),
       );
-    } else if (!isMe &&
+    }
+
+    if (!isMe &&
         canNudge &&
         (state == ContributionState.apayer ||
             state == ContributionState.retard)) {
-      action = _TinyButton(
-        label: 'Relancer',
-        icon: TnIcons.bell(size: 14, color: TantinColors.majorelleDeep),
-        background: TantinColors.majorelleSoft,
-        foreground: TantinColors.majorelleDeep,
-        onPressed: onAction,
+      actions.add(
+        _TinyButton(
+          label: 'Relancer',
+          icon: TnIcons.bell(size: 14, color: TantinColors.majorelleDeep),
+          background: TantinColors.majorelleSoft,
+          foreground: TantinColors.majorelleDeep,
+          onPressed: nudgeBusy ? null : onSendNudge,
+          busy: nudgeBusy,
+        ),
       );
     } else if (state == ContributionState.attente && isMe) {
-      action = const Text(
-        'En attente',
-        style: TextStyle(
-          color: TantinColors.saffronDeep,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+      actions.add(
+        const Text(
+          'En attente',
+          style: TextStyle(
+            color: TantinColors.saffronDeep,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       );
     }
@@ -959,9 +1588,14 @@ class _ContributionRow extends StatelessWidget {
               ],
             ),
           ),
-          if (action != null) ...[
+          if (actions.isNotEmpty) ...[
             const SizedBox(width: 10),
-            action,
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 6,
+              runSpacing: 6,
+              children: actions,
+            ),
           ],
         ],
       ),
@@ -976,40 +1610,54 @@ class _TinyButton extends StatelessWidget {
     required this.foreground,
     required this.onPressed,
     this.icon,
+    this.busy = false,
   });
 
   final String label;
   final Color background;
   final Color foreground;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final Widget? icon;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      onPressed: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(11),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              icon!,
-              const SizedBox(width: 5),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                color: foreground,
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
+    return Opacity(
+      opacity: onPressed == null ? 0.56 : 1,
+      child: Pressable(
+        onPressed: onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy) ...[
+                SizedBox.square(
+                  dimension: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: foreground,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ] else if (icon != null) ...[
+                icon!,
+                const SizedBox(width: 5),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1532,6 +2180,18 @@ DaretState _badgeState(ContributionState state) {
 int _memberOrder(List<String> orderedUids, String uid) {
   final index = orderedUids.indexOf(uid);
   return index == -1 ? orderedUids.length + 1 : index;
+}
+
+String _contributionKey(int periodIndex, String payerUid) {
+  return '$periodIndex:$payerUid';
+}
+
+String _nudgeKey(int periodIndex, String payerUid) {
+  return 'nudge:${_contributionKey(periodIndex, payerUid)}';
+}
+
+String _advanceKey(String daretId) {
+  return 'advance:$daretId';
 }
 
 Color _activityColor(ActivityType type, Color accent) {
