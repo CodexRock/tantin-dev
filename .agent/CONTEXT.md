@@ -134,9 +134,9 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   `[firebase_functions/unauthenticated]` on `startDaret`. Commit `80dae7b` fixes the math model: gross
   cagnotte = base amount * period count, period payout = base amount * (period count - 1), and grouped
   recipients split one period share for both monthly payments and payouts. A callable auth guard now
-  force-refreshes the Firebase ID token before each callable. `npm test` is PASS after this fix, and the
-  user-run `dart run tool/verify.dart` is PASS for this tree. CI proof for the latest pushed HEAD,
-  Functions deploy, and physical-device retest are still required.
+  force-refreshes the Firebase ID token before each callable. `npm test` is PASS after this fix, the
+  user-run `dart run tool/verify.dart` is PASS for this tree, and CI run 26922657221 is GREEN for pushed
+  HEAD `1673c1c`. Functions deploy and physical-device retest are still required.
 - **Supersedes older bullets below:** the previous S3/S4 handoff notes in this section are historical and
   should not be used as the current state.
 

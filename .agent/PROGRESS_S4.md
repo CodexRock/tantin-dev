@@ -1,7 +1,7 @@
 # PROGRESS - Sprint S4: Create Wizard + Drag-Drop + Join
 
 **Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
-**Started:** 2026-06-03     **Status:** Device bug fixes committed/pushed; CI, Functions deploy, and device retest pending
+**Started:** 2026-06-03     **Status:** Device bug fixes CI GREEN; Functions deploy and device retest pending
 **Prereqs verified:** Y
 
 ## Objective
@@ -203,6 +203,15 @@ SUMMARY
 GATE: PASS
 ```
 
+### CI proof after device bug fix (2026-06-04) - GitHub Actions
+Checked run `26922657221` for pushed HEAD `1673c1c8ed935da17dbf51f65a97ddd9b6607ef7`:
+```
+CI: GREEN
+backend: success
+verify: success
+Run: https://github.com/CodexRock/tantin-dev/actions/runs/26922657221
+```
+
 ### S4 Flutter slice - targeted analyze/tests/goldens
 ```
 flutter analyze --fatal-infos lib\features\create_daret lib\features\join_daret lib\features\darets\data\daret_callable_repository.dart lib\features\shell\presentation\create_join_sheet.dart lib\core\router\router.dart test\features\create_daret test\features\join_daret
@@ -270,10 +279,10 @@ Log overflowed the console, switching to line-by-line logging.
   was marked `[skip ci]`. Device-bug-fix commit `80dae7b` corrects period-share
   math, adds callable auth token refresh, and updates tests/docs after the
   fresh user-run gate passed. It has been pushed to `origin/main`.
-- CI evidence is **GREEN for `a3baca3`** (run 26917868600, both `verify` and
-  `backend` jobs green, confirmed by the user and pasted below). Do not claim a
-  separate CI run for `9024973`, `80dae7b`, or the latest pushed HEAD until
-  `dart run tool/check_ci.dart` proves it.
+- CI evidence is **GREEN for `1673c1c`** (run 26922657221, both `verify` and
+  `backend` jobs success, checked via GitHub Actions API). Earlier CI evidence
+  was also green for `a3baca3` (run 26917868600, user-confirmed). Do not claim
+  device proof or live Functions proof until the user reruns the walkthrough.
 - Verification review found and fixed one S4 UI bug in the group split editor:
   the open split sheet now redraws live while +/- changes shares. User-run
   `dart run tool/verify.dart` passed after the fix.
@@ -323,8 +332,7 @@ Log overflowed the console, switching to line-by-line logging.
 - [x] RESOLVED: user ran `dart run tool/verify.dart` after the device bug fixes and pasted `GATE: PASS`.
 - [~] BLOCKED pending device retest after deploying the updated Functions bundle: creation submit must no
   longer return `[firebase_functions/unauthenticated]`, and grouped shares must show/pay/receive correctly.
-- [~] BLOCKED pending push/CI for the device-bug-fix commit: after committing and pushing this tree, prove
-  CI green for the pushed HEAD before S4 can be signed off.
+- [x] RESOLVED: CI is green for pushed HEAD `1673c1c` (run 26922657221, `backend` + `verify` success).
 
 ### CI proof — `dart run tool/check_ci.dart`
 ```
@@ -342,20 +350,20 @@ plus the `backend` job = Firestore/Storage rules tests + Functions Jest. Both jo
 - `a3baca3` feat(daret): S4 create wizard + drag-drop payout + join-by-code + approval
 - `9024973` docs(s4): record codegen-fix gate PASS + CI green (run 26917868600) [skip ci]
 - `80dae7b` fix(daret): correct S4 period-share math
-- Pushed to `origin/main` through `80dae7b`; CI run 26917868600 = success for app commit `a3baca3`
-  (docs-only `9024973` skipped CI). CI proof for `80dae7b` / the latest pushed HEAD is still pending.
+- `1673c1c` docs(s4): record device bug fix handoff
+- Pushed to `origin/main` through `1673c1c`; CI run 26922657221 = success for latest pushed HEAD.
 
 ## Definition of Done gate
 - [ ] Every task above is implemented and verified
 - [x] `dart run tool/verify.dart` -> `GATE: PASS` with output pasted for the current device-bug-fix tree
 - [x] Backend lint/tests + security-rules emulator tests pass with output pasted
-- [ ] CI is green for pushed commit with output pasted
+- [x] CI is green for pushed commit with output pasted
 - [ ] New UI visually matches prototype and has committed goldens
 - [ ] App builds and touched flows run on Android
-- [ ] `CONTEXT.md`, `DECISIONS.md`, and this file are current
-- [ ] All work committed per task and pushed
-- [ ] No secrets/private keys committed
-- [ ] Cloud config changes deployed and verified live or marked blocked
+- [~] `CONTEXT.md`, `DECISIONS.md`, and this file are current; final device result still needs recording
+- [x] All S4 work committed per task and pushed
+- [x] No secrets/private keys committed
+- [~] Cloud config changes deployed and verified live or marked blocked
 - [ ] Sprint S4 complete summary posted
 
 **Sprint sign-off:** Pending.
