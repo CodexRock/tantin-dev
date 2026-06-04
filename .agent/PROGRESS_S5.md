@@ -34,8 +34,8 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - [x] **SECURITY CHECKPOINT (mandatory, before Part 3)** — rules tests prove: non-recipient/non-admin cannot confirm; member can only declare their own; no client write to period.status/aggregates. `npm test`/`npm run test:rules` green + pasted. STOP and post checkpoint message; wait for lead go-ahead.
 
 ### Part 3 — Payout celebration + clôture (screens 23, 24)
-- [ ] T8 — « C'est ton tour! » payout takeover: confetti + amount count-up + shareable « payout reçu » card (ShareCardSheet → share_plus image). Celebration only, NO gamification
-- [ ] T9 — Clôture du daret: closing summary + thanks (`closeDaret`) → moves to Terminés; lifetime stats updated
+- [x] T8 — « C'est ton tour! » payout takeover: confetti + amount count-up + shareable « payout reçu » card (ShareCardSheet → share_plus image). Celebration only, NO gamification
+- [x] T9 — Clôture du daret: closing summary + thanks (`closeDaret`) → moves to Terminés; lifetime stats updated
 
 ### Part 4 — Admin (screens 25, 26) — build FULLY, not stubs
 - [ ] T10 — Gérer le daret (AdminSheets): edit details, réorganiser l'ordre, remplacer un membre, manage/close a period, adjust amounts, supprimer le daret (confirmation guard). Admin-gated by rules + Functions
@@ -53,6 +53,8 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - 2026-06-04 — Began Part 2 only. Removed the Part-1 `_showPartTwoSnack` placeholder, wired `ConfirmPaySheet` / `ReceivedSheet` to `DaretRepository.declarePaid` and `DaretRepository.confirmReceived` direct rules-guarded client writes, wired `Relancer` to `sendNudge`, and surfaced admin `advancePeriod` only when all current contributions are confirmed. Extended the hub widget smoke for the two sheets and extended `rules-tests/firestore.rules.test.cjs` with the mandatory allow/deny checkpoint cases. Awaiting user-run `npm run test:rules` and `dart run tool\verify.dart`; no Part 2 boxes checked yet.
 - 2026-06-04 — User ran `dart format`, `npm run test:rules`, and `dart run tool\verify.dart`. Rules checkpoint passed (`24 passed, 24 total`), but canonical gate failed on six analyzer infos in `daret_hub_screen.dart` (`discarded_futures` x3, `lines_longer_than_80_chars` x3). Fixed those reported issues with explicit `unawaited(...)` and wrapped sheet strings. Awaiting rerun of `dart format` + `dart run tool\verify.dart`; no Part 2 boxes checked yet.
 - 2026-06-04 — User reran `dart format lib\features\darets\presentation\screens\daret_hub_screen.dart` and `dart run tool\verify.dart`; canonical gate passed (`GATE: PASS`). Checked T4–T7 and the mandatory Part-2 security checkpoint only. STOP before Part 3 pending lead go-ahead.
+- 2026-06-04 — Lead approved proceeding to Part 3. Implemented the payout takeover entry for current recipients (`C'EST VOTRE TOUR !`, confetti, count-up, `ShareCardSheet` with `share_plus` PNG capture) and final-period clôture UI (`closeDaret` confirmation + thank-you summary). Updated `closeDaretHandler` to reuse the final `closePeriodCore` path so early closure is rejected and final recipient lifetime stats/activity are produced server-side. Added focused widget smoke coverage for payout/share/clôture sheet and functions tests for early-close deny + final-close stats. Awaiting user-run `dart format`, `npm run test:functions`, and `dart run tool\verify.dart`; no Part 3 boxes checked yet.
+- 2026-06-04 — User ran `npm run test:functions` (18 passed, incl. new `closeDaret` early-close deny + final-close stats) and `dart run tool\verify.dart` (GATE: FAIL): 3 compile errors in `daret_hub_screen_test.dart` (non-const default params on `_host`) + analyzer infos in `daret_hub_screen.dart` (unused `dart:typed_data`, `unnecessary_null_comparison`, two `use_build_context_synchronously` in `_shareCard`, a noop `.toDouble()`, 5 redundant `starTile` args) + a test type-annotation. **Lead fixed all 14** (nullable `_host` params with `?? _default`; explicit `Daret` type; removed unused import; pre-await `pixelRatio` capture + `mounted` guard; dropped redundant args). User reran `dart format` + `dart run tool\verify.dart` → **GATE: PASS (64 tests, No issues found)**. Checked T8/T9. Part 3 complete.
 
 ## Verification evidence (PASTE REAL OUTPUT — no adjectives, per the Prime Directive)
 
@@ -117,16 +119,32 @@ Static analysis findings:
 GATE: PASS ✅  — safe to check DoD boxes.
 ```
 
-### Functions tests — `npm run test:functions`
+### Functions tests — `npm run test:functions` (Part 3)
 ```
-{paste Test Suites/Tests counts; bare `jest` fails with "FIRESTORE_EMULATOR_HOST must be set"}
+PASS  test/index.test.ts (33.644 s)
+  ... (incl.)
+    √ closePeriod rejects unconfirmed contributions and advances when all are confirmed
+    √ closeDaret rejects before every member has received
+    √ closeDaret closes final confirmed period and increments recipient stats
+Test Suites: 1 passed, 1 total
+Tests:       18 passed, 18 total
 ```
 
-### Final canonical gate — `dart run tool/verify.dart`
+### Final canonical gate — `dart run tool/verify.dart` (Part 3, post-fix)
 ```
-{paste SUMMARY + GATE: PASS}
+═══════════════════════════════════════════════
+ SUMMARY
+═══════════════════════════════════════════════
+  ✅  Resolve dependencies
+  ✅  Generate l10n
+  ✅  Codegen reproduces
+  ✅  Format check
+  ✅  Static analysis      (No issues found!)
+  ✅  Tests                (00:36 +64: All tests passed!)
+═══════════════════════════════════════════════
+GATE: PASS ✅
 ```
-- Tests added this sprint: `test/features/darets/presentation/daret_hub_screen_test.dart` (Part 1 hub render/tabs smoke; Part 2 confirm/received sheet entry smoke), `rules-tests/firestore.rules.test.cjs` Part 2 confirmation allow/deny checkpoint cases
+- Tests added this sprint: `test/features/darets/presentation/daret_hub_screen_test.dart` (Part 1 hub render/tabs smoke; Part 2 confirm/received sheet entry smoke; Part 3 payout/share/clôture sheet smoke), `rules-tests/firestore.rules.test.cjs` Part 2 confirmation allow/deny checkpoint cases, `functions/test/index.test.ts` Part 3 `closeDaret` early-close deny + final-close stats coverage
 - Screens compared to prototype (hub/sheets/payout/clôture/admin): {match? goldens committed?}
 
 ### CI proof — `dart run tool/check_ci.dart`
@@ -141,7 +159,7 @@ GATE: PASS ✅  — safe to check DoD boxes.
 {firebase deploy --only functions/firestore — deployed? For the 4 S5 callables first-invoked on device (advancePeriod/closePeriod/closeDaret/sendNudge), confirm Cloud Run invoker bindings (D027) granted & verified.}
 
 ## Blockers / questions for the user
-- Part 2 confirmation core is gate-green. STOP before Part 3 pending lead go-ahead.
+- Parts 1–3 done and gate-green. Next: Part 4 (admin) + close-out (CI proof, device walkthrough, goldens decision). Before the device walkthrough, grant the D027 invoker bindings on the 4 S5 callables (see WATCH below).
 - WATCH (D027): on first device call, the new callables (advancePeriod, closePeriod, closeDaret, sendNudge)
   may return raw `[firebase_functions/unauthenticated] UNAUTHENTICATED` (missing Cloud Run invoker binding).
   Fix proactively: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers

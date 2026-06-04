@@ -688,31 +688,32 @@ async function closeDaretHandler(
   context: HandlerContext<DaretIdInput>,
   deps: HandlerDeps,
 ): Promise<{closed: boolean}> {
-  const {db} = deps;
-  const now = deps.now();
-  const daretRef = db.collection('darets').doc(context.data.daretId);
+  const daretSnapshot = await deps.db.collection('darets').doc(context.data.daretId).get();
+  const daret = requireExistingData(daretSnapshot, 'daret');
+  requireAdmin(daret, context.uid);
+  const status = requireStatus(daret);
+  if (status === 'termine') {
+    return {closed: false};
+  }
+  if (status !== 'actif') {
+    fail('failed-precondition', 'Only active darets can be closed.');
+  }
 
-  return db.runTransaction(async (transaction) => {
-    const daretSnapshot = await transaction.get(daretRef);
-    const daret = requireExistingData(daretSnapshot, 'daret');
-    requireAdmin(daret, context.uid);
-    if (requireStatus(daret) === 'termine') {
-      return {closed: false};
-    }
-    transaction.update(daretRef, {statut: 'termine', closedAt: now, updatedAt: now});
-    transaction.set(
-      daretRef.collection('activity').doc('closed'),
-      activityDocument({
-        type: 'cloture',
-        actorUid: context.uid,
-        text: `${requireString(daret, 'nom')} est clôturé`,
-        createdAt: now,
-      }),
-      {merge: true},
-    );
-    logger.info('closeDaret completed', {daretId: context.data.daretId, uid: context.uid});
-    return {closed: true};
-  });
+  const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+  const periodesCount = requirePositiveInteger(daret, 'periodesCount');
+  if (currentPeriode < periodesCount) {
+    fail('failed-precondition', 'Every member must receive their turn before closing.');
+  }
+
+  const result = await closePeriodCore(
+    {
+      uid: context.uid,
+      daretId: context.data.daretId,
+      periodIndex: currentPeriode,
+    },
+    deps,
+  );
+  return {closed: result.closed};
 }
 
 async function sendNudgeHandler(

@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:tantin_flutter/core/format/date_format.dart';
 import 'package:tantin_flutter/core/format/format.dart';
+import 'package:tantin_flutter/core/motion/confetti.dart';
 import 'package:tantin_flutter/core/motion/motion.dart';
 import 'package:tantin_flutter/core/theme/color_utils.dart';
 import 'package:tantin_flutter/core/theme/tokens.dart';
@@ -15,6 +19,7 @@ import 'package:tantin_flutter/features/darets/data/daret_callable_providers.dar
 import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_logic.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
+import 'package:tantin_flutter/features/onboarding/presentation/widgets/big_wordmark.dart';
 import 'package:tantin_flutter/features/profile/data/user_providers.dart';
 
 enum _HubTab { courant, periodes, membres, activite }
@@ -34,6 +39,8 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
   _HubTab _tab = _HubTab.courant;
   final Map<String, ContributionState> _optimisticStates = {};
   final Set<String> _busyKeys = {};
+  String? _dismissedPayoutKey;
+  bool _showClosureThanks = false;
 
   @override
   Widget build(BuildContext context) {
@@ -90,6 +97,52 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final membersByUid = {for (final member in members) member.uid: member};
     final accent = hexToColor(daret.accent);
     final isAdmin = uid != null && uid == daret.adminUid;
+    final currentMember = uid == null ? null : membersByUid[uid];
+    final currentShare = uid == null ? 0 : currentPeriod?.shares[uid] ?? 0;
+    final payoutAmount = currentPeriod == null
+        ? 0
+        : amountForShare(
+            amount: currentPeriod.potAmount,
+            share: currentShare == 0 ? 100 : currentShare,
+          );
+    final payoutKey = currentPeriod == null || uid == null
+        ? null
+        : '${daret.id}:${currentPeriod.id}:$uid';
+    final showPayoutTakeover =
+        daret.statut == DaretStatus.actif &&
+        currentPeriod != null &&
+        uid != null &&
+        currentPeriod.recipientUids.contains(uid) &&
+        _dismissedPayoutKey != payoutKey;
+
+    if (_showClosureThanks || daret.statut == DaretStatus.termine) {
+      return _ClotureThanksScreen(
+        daret: daret,
+        members: members,
+        periods: periods,
+        accent: accent,
+        onBackToDarets: () => context.go('/darets'),
+      );
+    }
+
+    if (showPayoutTakeover && currentMember != null) {
+      return _PayoutTakeoverScreen(
+        daret: daret,
+        period: currentPeriod,
+        member: currentMember,
+        amount: payoutAmount,
+        accent: accent,
+        onShare: () => _showPayoutShareSheet(
+          context,
+          daret: daret,
+          period: currentPeriod,
+          member: currentMember,
+          amount: payoutAmount,
+          accent: accent,
+        ),
+        onContinue: () => setState(() => _dismissedPayoutKey = payoutKey),
+      );
+    }
 
     return Scaffold(
       backgroundColor: TantinColors.ivoryBg,
@@ -178,7 +231,11 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                         ),
                       );
                     },
-                    onAdvancePeriod: () => _handleAdvancePeriod(daret),
+                    advanceBusy: _busyKeys.contains(_advanceKey(daret.id)),
+                    onAdvancePeriod: () =>
+                        unawaited(_handleAdvancePeriod(daret)),
+                    closeBusy: _busyKeys.contains(_closeDaretKey(daret.id)),
+                    onCloseDaret: () => unawaited(_handleCloseDaret(daret)),
                   ),
                   _HubTab.periodes => _PeriodsTimelineTab(
                     daret: daret,
@@ -319,7 +376,23 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     );
   }
 
-  Future<void> _runHubAction({
+  Future<void> _handleCloseDaret(Daret daret) async {
+    final confirmed = await _showCloseDaretSheet(context, daret: daret);
+    if (confirmed != true || !mounted) return;
+
+    final closed = await _runHubAction(
+      busyKey: _closeDaretKey(daret.id),
+      successMessage: 'Daret clôturé - merci à tous',
+      failurePrefix: 'Clôture impossible',
+      action: () =>
+          ref.read(daretCallableRepositoryProvider).closeDaret(daret.id),
+    );
+    if (closed && mounted) {
+      setState(() => _showClosureThanks = true);
+    }
+  }
+
+  Future<bool> _runHubAction({
     required String busyKey,
     required String successMessage,
     required String failurePrefix,
@@ -327,7 +400,7 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     String? optimisticKey,
     ContributionState? optimisticState,
   }) async {
-    if (_busyKeys.contains(busyKey)) return;
+    if (_busyKeys.contains(busyKey)) return false;
 
     setState(() {
       _busyKeys.add(busyKey);
@@ -339,21 +412,22 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     try {
       await action();
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _busyKeys.remove(busyKey);
         if (optimisticKey != null) _optimisticStates.remove(optimisticKey);
       });
       _showSnack('$failurePrefix : $error');
-      return;
+      return false;
     }
 
-    if (!mounted) return;
+    if (!mounted) return false;
     setState(() {
       _busyKeys.remove(busyKey);
       if (optimisticKey != null) _optimisticStates.remove(optimisticKey);
     });
     _showSnack(successMessage);
+    return true;
   }
 
   void _showSnack(String message) {
@@ -396,6 +470,40 @@ Future<bool?> _showReceivedSheet(
       payer: payer,
       adminDirectConfirm: adminDirectConfirm,
     ),
+  );
+}
+
+Future<void> _showPayoutShareSheet(
+  BuildContext context, {
+  required Daret daret,
+  required DaretPeriod period,
+  required DaretMember member,
+  required int amount,
+  required Color accent,
+}) {
+  return showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _ShareCardSheet(
+      daret: daret,
+      period: period,
+      member: member,
+      amount: amount,
+      accent: accent,
+    ),
+  );
+}
+
+Future<bool?> _showCloseDaretSheet(
+  BuildContext context, {
+  required Daret daret,
+}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _CloseDaretSheet(daret: daret),
   );
 }
 
@@ -562,6 +670,734 @@ class _ReceivedSheet extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PayoutTakeoverScreen extends StatelessWidget {
+  const _PayoutTakeoverScreen({
+    required this.daret,
+    required this.period,
+    required this.member,
+    required this.amount,
+    required this.accent,
+    required this.onShare,
+    required this.onContinue,
+  });
+
+  final Daret daret;
+  final DaretPeriod period;
+  final DaretMember member;
+  final int amount;
+  final Color accent;
+  final VoidCallback onShare;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final deep = _shade(accent, -0.28);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    return Scaffold(
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [accent, deep],
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.35,
+                child: TnArt.zelligeFaint(),
+              ),
+            ),
+            Positioned(
+              right: -30,
+              top: 58,
+              child: Opacity(
+                opacity: 0.24,
+                child: TnArt.starTile(
+                  size: 142,
+                  c1: Colors.white,
+                  c3: Colors.white,
+                ),
+              ),
+            ),
+            const Positioned.fill(child: PayoutConfetti()),
+            SafeArea(
+              child: Column(
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 10, 18, 0),
+                      child: _HeaderIconButton(
+                        onPressed: onContinue,
+                        child: TnIcons.close(size: 22, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 96,
+                            height: 96,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: TantinColors.saffron,
+                              borderRadius: BorderRadius.circular(32),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: TantinColors.saffron.withValues(
+                                    alpha: 0.5,
+                                  ),
+                                  blurRadius: 40,
+                                  offset: const Offset(0, 16),
+                                ),
+                              ],
+                            ),
+                            child: TnIcons.gift(
+                              size: 48,
+                              color: const Color(0xFF2A1B05),
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          const Text(
+                            "C'EST VOTRE TOUR !",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Color(0xFFFCDFA6),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.34,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Vous recevez',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.displayLarge
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 30,
+                                  letterSpacing: -0.6,
+                                ),
+                          ),
+                          const SizedBox(height: 12),
+                          CountUp(
+                            value: amount.toDouble(),
+                            style: Theme.of(context).textTheme.displayLarge
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 54,
+                                  letterSpacing: -1.08,
+                                  height: 1,
+                                ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text.rich(
+                            TextSpan(
+                              text:
+                                  'Félicitations ${member.prenom} ! '
+                                  'La cagnotte de ',
+                              children: [
+                                TextSpan(
+                                  text: daret.nom,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                TextSpan(
+                                  text:
+                                      ' vous revient '
+                                      '${_periodMoment(daret)}.',
+                                ),
+                              ],
+                            ),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xD1FFFFFF),
+                              fontSize: 15,
+                              height: 1.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(24, 0, 24, 24 + bottom),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TnButton(
+                          full: true,
+                          variant: ButtonVariant.saffron,
+                          icon: TnIcons.share(
+                            size: 20,
+                            color: const Color(0xFF2A1B05),
+                          ),
+                          onPressed: onShare,
+                          child: const Text('Partager ma carte'),
+                        ),
+                        const SizedBox(height: 11),
+                        _PayoutSecondaryButton(onPressed: onContinue),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PayoutSecondaryButton extends StatelessWidget {
+  const _PayoutSecondaryButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onPressed: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Text(
+          'Continuer',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15.5,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShareCardSheet extends StatefulWidget {
+  const _ShareCardSheet({
+    required this.daret,
+    required this.period,
+    required this.member,
+    required this.amount,
+    required this.accent,
+  });
+
+  final Daret daret;
+  final DaretPeriod period;
+  final DaretMember member;
+  final int amount;
+  final Color accent;
+
+  @override
+  State<_ShareCardSheet> createState() => _ShareCardSheetState();
+}
+
+class _ShareCardSheetState extends State<_ShareCardSheet> {
+  final GlobalKey _cardKey = GlobalKey();
+  bool _sharing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Votre carte',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 14),
+          RepaintBoundary(
+            key: _cardKey,
+            child: _PayoutShareCard(
+              daret: widget.daret,
+              period: widget.period,
+              member: widget.member,
+              amount: widget.amount,
+              accent: widget.accent,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TnButton(
+            full: true,
+            disabled: _sharing,
+            icon: _sharing
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : TnIcons.send(size: 18, color: Colors.white),
+            onPressed: _sharing ? null : _shareCard,
+            child: Text(_sharing ? 'Préparation...' : 'Partager sur WhatsApp'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _shareCard() async {
+    if (_sharing) return;
+    final pixelRatio = (View.of(context).devicePixelRatio * 2).clamp(2.0, 4.0);
+    setState(() => _sharing = true);
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      final renderObject = _cardKey.currentContext?.findRenderObject();
+      final boundary = renderObject is RenderRepaintBoundary
+          ? renderObject
+          : null;
+      if (boundary == null) {
+        throw StateError('Carte indisponible.');
+      }
+
+      final image = await boundary.toImage(pixelRatio: pixelRatio);
+      final byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      final bytes = byteData?.buffer.asUint8List();
+      if (bytes == null) {
+        throw StateError('Image indisponible.');
+      }
+
+      if (!mounted) return;
+      final box = context.findRenderObject();
+      final origin = box is RenderBox
+          ? box.localToGlobal(Offset.zero) & box.size
+          : null;
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              bytes,
+              mimeType: 'image/png',
+            ),
+          ],
+          fileNameOverrides: const ['tantin-tour-recu.png'],
+          subject: "Tour reçu Tant'in",
+          text:
+              "Tour reçu sur Tant'in : "
+              '${TantinFormat.fmtDH(widget.amount)} - ${widget.daret.nom}.',
+          sharePositionOrigin: origin,
+        ),
+      );
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Partage impossible : $error')),
+          );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _sharing = false);
+      }
+    }
+  }
+}
+
+class _PayoutShareCard extends StatelessWidget {
+  const _PayoutShareCard({
+    required this.daret,
+    required this.period,
+    required this.member,
+    required this.amount,
+    required this.accent,
+  });
+
+  final Daret daret;
+  final DaretPeriod period;
+  final DaretMember member;
+  final int amount;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final deep = _shade(accent, -0.24);
+    final periodDate = TantinDates.monthYear(period.scheduledDate);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent, deep],
+        ),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.28,
+                child: TnArt.zelligeFaint(),
+              ),
+            ),
+            Positioned(
+              right: -20,
+              top: -16,
+              child: Opacity(
+                opacity: 0.25,
+                child: TnArt.starTile(
+                  c1: Colors.white,
+                  c3: Colors.white,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const BigWordmark(size: 22, light: true),
+                  const SizedBox(height: 20),
+                  Row(
+                    children: [
+                      Avatar(data: _avatarData(member), size: 48),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Tour reçu',
+                              style: TextStyle(
+                                color: Color(0xCCFFFFFF),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              member.prenom,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.displayLarge
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    TantinFormat.fmtDH(amount),
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      color: Colors.white,
+                      fontSize: 40,
+                      letterSpacing: -0.8,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${daret.nom} · $periodDate',
+                    style: const TextStyle(
+                      color: Color(0xC7FFFFFF),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CloseDaretSheet extends StatelessWidget {
+  const _CloseDaretSheet({required this.daret});
+
+  final Daret daret;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.success.withValues(alpha: 0.12),
+            child: TnIcons.checkCircle(size: 31, color: TantinColors.success),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Clôturer le daret ?',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Tous les tours de ${daret.nom} sont confirmés. '
+            'Le daret passera dans Terminés et la clôture sera inscrite '
+            "dans l'activité.",
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const _TrustNotice(
+            text:
+                "Tant'in ne déplace jamais d'argent. "
+                'Cette action termine seulement le suivi de confiance.',
+          ),
+          const SizedBox(height: 18),
+          TnButton(
+            full: true,
+            icon: TnIcons.check(size: 18, color: Colors.white),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clôturer le daret'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop(false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ClotureThanksScreen extends StatelessWidget {
+  const _ClotureThanksScreen({
+    required this.daret,
+    required this.members,
+    required this.periods,
+    required this.accent,
+    required this.onBackToDarets,
+  });
+
+  final Daret daret;
+  final List<DaretMember> members;
+  final List<DaretPeriod> periods;
+  final Color accent;
+  final VoidCallback onBackToDarets;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalReceived = periods.isEmpty
+        ? daret.cagnotteParPeriode * daret.periodesCount
+        : periods.fold<int>(0, (sum, period) => sum + period.potAmount);
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    return Scaffold(
+      backgroundColor: TantinColors.ivoryBg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: _HeaderIconButton(
+                  onPressed: onBackToDarets,
+                  child: TnIcons.chevL(size: 22, color: TantinColors.ink),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                children: [
+                  Center(
+                    child: TnArt.starTile(
+                      size: 110,
+                      c1: TantinColors.success,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Daret terminé',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                      color: TantinColors.ink,
+                      fontSize: 28,
+                      letterSpacing: -0.56,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text.rich(
+                    TextSpan(
+                      text: 'Tout le monde a reçu son tour dans ',
+                      children: [
+                        TextSpan(
+                          text: daret.nom,
+                          style: const TextStyle(
+                            color: TantinColors.ink,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: '. Merci pour votre confiance !',
+                        ),
+                      ],
+                    ),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: TantinColors.inkMuted,
+                      fontSize: 15,
+                      height: 1.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SummaryTile(
+                          label: 'Cagnotte totale',
+                          value: TantinFormat.fmtDH(totalReceived),
+                          accent: TantinColors.success,
+                        ),
+                      ),
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: _SummaryTile(
+                          label: 'Tours bouclés',
+                          value: '${daret.periodesCount}',
+                          accent: accent,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                    decoration: BoxDecoration(
+                      color: TantinColors.ivorySurface,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: TantinColors.hairline),
+                      boxShadow: TantinShadows.sm,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Membres (${members.length})',
+                          style: const TextStyle(
+                            color: TantinColors.inkMuted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        AvatarStack(
+                          avatars: members.map(_avatarData).toList(),
+                          maxCount: 8,
+                          size: 32,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(24, 12, 24, 20 + bottom),
+              child: TnButton(
+                full: true,
+                size: ButtonSize.lg,
+                onPressed: onBackToDarets,
+                child: const Text('Retour aux darets'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: TantinColors.ivorySurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TantinColors.hairline),
+        boxShadow: TantinShadows.sm,
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: accent,
+              fontSize: 21,
+              letterSpacing: -0.42,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -937,7 +1773,10 @@ class _CurrentPeriodTab extends StatelessWidget {
     required this.onDeclarePaid,
     required this.onConfirmReceived,
     required this.onSendNudge,
+    required this.advanceBusy,
     required this.onAdvancePeriod,
+    required this.closeBusy,
+    required this.onCloseDaret,
   });
 
   final Daret daret;
@@ -951,7 +1790,10 @@ class _CurrentPeriodTab extends StatelessWidget {
   final _ContributionAction onDeclarePaid;
   final _ContributionAction onConfirmReceived;
   final _ContributionAction onSendNudge;
+  final bool advanceBusy;
   final VoidCallback onAdvancePeriod;
+  final bool closeBusy;
+  final VoidCallback onCloseDaret;
 
   @override
   Widget build(BuildContext context) {
@@ -968,6 +1810,7 @@ class _CurrentPeriodTab extends StatelessWidget {
     final progress = periodProgress(contributions);
     final allIn =
         progress.totalCount > 0 && progress.paidCount >= progress.totalCount;
+    final lastPeriod = currentPeriod!.index >= daret.periodesCount;
     final myContribution = currentUid == null
         ? null
         : contributions.firstWhereOrNull(
@@ -1012,11 +1855,14 @@ class _CurrentPeriodTab extends StatelessWidget {
                     myContribution.payerUid,
                   ),
                 ),
-            advanceBusy: busyKeys.contains(_advanceKey(daret.id)),
+            advanceBusy: advanceBusy,
+            closeBusy: closeBusy,
+            lastPeriod: lastPeriod,
             onDeclarePaid: myContribution == null
                 ? null
                 : () => onDeclarePaid(myContribution),
             onAdvancePeriod: onAdvancePeriod,
+            onCloseDaret: onCloseDaret,
           ),
           const SizedBox(height: 18),
         ],
@@ -1024,8 +1870,10 @@ class _CurrentPeriodTab extends StatelessWidget {
         if (!iAmRecipient && isAdmin && allIn) ...[
           const SizedBox(height: 12),
           _AdvancePeriodBanner(
-            busy: busyKeys.contains(_advanceKey(daret.id)),
+            busy: lastPeriod ? closeBusy : advanceBusy,
+            lastPeriod: lastPeriod,
             onAdvancePeriod: onAdvancePeriod,
+            onCloseDaret: onCloseDaret,
           ),
         ],
         const SizedBox(height: 12),
@@ -1202,8 +2050,11 @@ class _MyActionBanner extends StatelessWidget {
     required this.progress,
     required this.busy,
     required this.advanceBusy,
+    required this.closeBusy,
+    required this.lastPeriod,
     required this.onDeclarePaid,
     required this.onAdvancePeriod,
+    required this.onCloseDaret,
   });
 
   final Daret daret;
@@ -1213,14 +2064,18 @@ class _MyActionBanner extends StatelessWidget {
   final PeriodProgress progress;
   final bool busy;
   final bool advanceBusy;
+  final bool closeBusy;
+  final bool lastPeriod;
   final VoidCallback? onDeclarePaid;
   final VoidCallback onAdvancePeriod;
+  final VoidCallback onCloseDaret;
 
   @override
   Widget build(BuildContext context) {
     if (iAmRecipient) {
       final allIn =
           progress.totalCount > 0 && progress.paidCount >= progress.totalCount;
+      final actionBusy = lastPeriod ? closeBusy : advanceBusy;
       return _BannerShell(
         background: TantinColors.majorelleSoft,
         iconBg: TantinColors.majorelle,
@@ -1228,13 +2083,23 @@ class _MyActionBanner extends StatelessWidget {
         title: allIn ? 'Tout est confirmé' : "C'est votre tour !",
         body: allIn
             ? (isAdmin
-                  ? 'Vous pouvez passer au tour suivant.'
+                  ? lastPeriod
+                        ? 'Vous pouvez clôturer ce daret.'
+                        : 'Vous pouvez passer au tour suivant.'
                   : 'La période peut être clôturée par l’admin.')
             : 'Confirmez les paiements reçus ci-dessous.',
-        actionLabel: allIn && isAdmin ? 'Tour suivant' : null,
+        actionLabel: allIn && isAdmin
+            ? lastPeriod
+                  ? 'Clôturer'
+                  : 'Tour suivant'
+            : null,
         actionColor: TantinColors.majorelle,
-        onAction: allIn && isAdmin && !advanceBusy ? onAdvancePeriod : null,
-        busy: advanceBusy,
+        onAction: allIn && isAdmin && !actionBusy
+            ? lastPeriod
+                  ? onCloseDaret
+                  : onAdvancePeriod
+            : null,
+        busy: actionBusy,
       );
     }
 
@@ -1385,11 +2250,15 @@ class _BannerShell extends StatelessWidget {
 class _AdvancePeriodBanner extends StatelessWidget {
   const _AdvancePeriodBanner({
     required this.busy,
+    required this.lastPeriod,
     required this.onAdvancePeriod,
+    required this.onCloseDaret,
   });
 
   final bool busy;
+  final bool lastPeriod;
   final VoidCallback onAdvancePeriod;
+  final VoidCallback onCloseDaret;
 
   @override
   Widget build(BuildContext context) {
@@ -1398,10 +2267,16 @@ class _AdvancePeriodBanner extends StatelessWidget {
       iconBg: TantinColors.success.withValues(alpha: 0.12),
       icon: TnIcons.checkCircle(size: 22, color: TantinColors.success),
       title: 'Tous les paiements sont confirmés',
-      body: 'Clôturez ce tour pour afficher la nouvelle période.',
-      actionLabel: 'Tour suivant',
+      body: lastPeriod
+          ? 'Clôturez le daret pour le classer dans Terminés.'
+          : 'Clôturez ce tour pour afficher la nouvelle période.',
+      actionLabel: lastPeriod ? 'Clôturer' : 'Tour suivant',
       actionColor: TantinColors.success,
-      onAction: busy ? null : onAdvancePeriod,
+      onAction: busy
+          ? null
+          : lastPeriod
+          ? onCloseDaret
+          : onAdvancePeriod,
       busy: busy,
     );
   }
@@ -2192,6 +3067,16 @@ String _nudgeKey(int periodIndex, String payerUid) {
 
 String _advanceKey(String daretId) {
   return 'advance:$daretId';
+}
+
+String _closeDaretKey(String daretId) {
+  return 'close:$daretId';
+}
+
+String _periodMoment(Daret daret) {
+  return daret.frequence == DaretFrequency.mensuel
+      ? 'ce mois-ci'
+      : 'ce tour-ci';
 }
 
 Color _activityColor(ActivityType type, Color accent) {

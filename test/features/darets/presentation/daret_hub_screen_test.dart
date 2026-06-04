@@ -123,6 +123,36 @@ final _periods = <DaretPeriod>[
   ),
 ];
 
+final Daret _closingDaret = _daret.copyWith(
+  currentPeriode: 4,
+  prochaineDate: DateTime(2026, 9, 5),
+);
+
+final _closingPeriods = <DaretPeriod>[
+  _periods[0],
+  _periods[1].copyWith(
+    status: PeriodStatus.closed,
+    paidCount: 3,
+    totalCount: 3,
+  ),
+  _periods[2].copyWith(
+    status: PeriodStatus.closed,
+    paidCount: 2,
+    totalCount: 2,
+  ),
+  DaretPeriod(
+    id: '04',
+    index: 4,
+    recipientUids: const ['salma'],
+    shares: const {'salma': 100},
+    scheduledDate: DateTime(2026, 9, 5),
+    potAmount: 4500,
+    status: PeriodStatus.current,
+    paidCount: 3,
+    totalCount: 3,
+  ),
+];
+
 const _contributions = <Contribution>[
   Contribution(
     payerUid: 'admin',
@@ -138,6 +168,29 @@ const _contributions = <Contribution>[
     payerUid: 'salma',
     state: ContributionState.attente,
     amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'reda',
+    state: ContributionState.confirme,
+    amount: 1500,
+  ),
+];
+
+const _closingContributions = <Contribution>[
+  Contribution(
+    payerUid: 'admin',
+    state: ContributionState.confirme,
+    amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'karim',
+    state: ContributionState.confirme,
+    amount: 1500,
+  ),
+  Contribution(
+    payerUid: 'salma',
+    state: ContributionState.recipient,
+    amount: 0,
   ),
   Contribution(
     payerUid: 'reda',
@@ -163,6 +216,10 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+
+    expect(find.text("C'EST VOTRE TOUR !"), findsOneWidget);
+    await tester.tap(find.text('Continuer'));
     await tester.pumpAndSettle();
 
     expect(find.text('Daret Famille'), findsOneWidget);
@@ -204,6 +261,7 @@ void main() {
   testWidgets('opens received confirmation sheet', (tester) async {
     await tester.pumpWidget(_host());
     await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
 
     await tester.tap(find.text('Reçu').first);
     await tester.pumpAndSettle();
@@ -211,22 +269,73 @@ void main() {
     expect(find.text('Confirmer la réception'), findsOneWidget);
     expect(find.textContaining('Validation admin'), findsOneWidget);
   });
+
+  testWidgets('shows payout takeover and share card sheet', (tester) async {
+    await tester.pumpWidget(_host());
+    await tester.pumpAndSettle();
+
+    expect(find.text("C'EST VOTRE TOUR !"), findsOneWidget);
+    expect(find.text('Vous recevez'), findsOneWidget);
+    expect(find.text('4 500 DH'), findsOneWidget);
+
+    await tester.tap(find.text('Partager ma carte'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Votre carte'), findsOneWidget);
+    expect(find.text('Tour reçu'), findsOneWidget);
+    expect(find.textContaining('Daret Famille'), findsWidgets);
+  });
+
+  testWidgets('opens final close confirmation sheet', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        daret: _closingDaret,
+        periods: _closingPeriods,
+        contributions: _closingContributions,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Clôturer').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Clôturer le daret ?'), findsOneWidget);
+    expect(
+      find.textContaining("Tant'in ne déplace jamais d'argent"),
+      findsOneWidget,
+    );
+  });
 }
 
-Widget _host({AppUser user = _user}) {
+Widget _host({
+  AppUser? user,
+  Daret? daret,
+  List<DaretPeriod>? periods,
+  List<Contribution>? contributions,
+  List<ActivityEvent>? activity,
+}) {
+  final hostUser = user ?? _user;
+  final hostDaret = daret ?? _daret;
+  final hostPeriods = periods ?? _periods;
+  final hostContributions = contributions ?? _contributions;
+  final hostActivity = activity ?? _activity;
   return ProviderScope(
     overrides: [
-      currentAppUserProvider.overrideWith((ref) => Stream.value(user)),
-      daretProvider(_daretId).overrideWith((ref) => Stream.value(_daret)),
+      currentAppUserProvider.overrideWith((ref) => Stream.value(hostUser)),
+      daretProvider(_daretId).overrideWith((ref) => Stream.value(hostDaret)),
       daretMembersProvider(_daretId).overrideWith(
         (ref) => Stream.value(_members),
       ),
-      periodsProvider(_daretId).overrideWith((ref) => Stream.value(_periods)),
-      currentContributionsProvider((_daretId, 2)).overrideWith(
-        (ref) => Stream.value(_contributions),
+      periodsProvider(
+        _daretId,
+      ).overrideWith((ref) => Stream.value(hostPeriods)),
+      currentContributionsProvider(
+        (_daretId, hostDaret.currentPeriode),
+      ).overrideWith(
+        (ref) => Stream.value(hostContributions),
       ),
       activityProvider(_daretId).overrideWith(
-        (ref) => Stream.value(_activity),
+        (ref) => Stream.value(hostActivity),
       ),
     ],
     child: const MaterialApp(
@@ -237,4 +346,10 @@ Widget _host({AppUser user = _user}) {
       ),
     ),
   );
+}
+
+Future<void> _dismissPayoutTakeover(WidgetTester tester) async {
+  if (find.text("C'EST VOTRE TOUR !").evaluate().isEmpty) return;
+  await tester.tap(find.text('Continuer'));
+  await tester.pumpAndSettle();
 }

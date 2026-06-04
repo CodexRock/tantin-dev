@@ -426,6 +426,31 @@ describe('daret state integrity', () => {
     expect(previous.data()?.status).toBe('closed');
     expect(next.data()?.status).toBe('current');
   });
+
+  test('closeDaret rejects before every member has received', async () => {
+    await seedActiveDaretWithContributions('d1', 'confirme');
+
+    await expectCodeAsync(
+      __testables.closeDaretHandler(ctx('admin', {daretId: 'd1'}), deps()),
+      'failed-precondition',
+    );
+  });
+
+  test('closeDaret closes final confirmed period and increments recipient stats', async () => {
+    await seedFinalPeriodReadyDaret('d1');
+
+    const result = await __testables.closeDaretHandler(ctx('admin', {daretId: 'd1'}), deps());
+
+    expect(result).toEqual({closed: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.statut).toBe('termine');
+    const finalPeriod = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
+    expect(finalPeriod.data()).toMatchObject({status: 'closed', paidCount: 1, totalCount: 1});
+    const member = await db.collection('users').doc('member').get();
+    expect(member.data()?.stats).toMatchObject({totalRecuVie: 1500});
+    const activity = await db.collection('darets').doc('d1').collection('activity').doc('closed').get();
+    expect(activity.data()).toMatchObject({type: 'cloture', actorUid: 'admin'});
+  });
 });
 
 describe('triggers and seed', () => {
@@ -733,6 +758,37 @@ async function seedActiveDaretWithContributions(
       confirmedAt: memberState === 'confirme' ? fixedNow : null,
       confirmedByUid: memberState === 'confirme' ? 'admin' : null,
     });
+}
+
+async function seedFinalPeriodReadyDaret(daretId: string): Promise<void> {
+  await seedActiveDaretWithContributions(daretId, 'confirme');
+  const daretRef = db.collection('darets').doc(daretId);
+  await daretRef.update({currentPeriode: 2});
+  await daretRef.collection('periods').doc('01').update({
+    status: 'closed',
+    closedAt: fixedNow,
+  });
+  await daretRef.collection('periods').doc('02').update({
+    status: 'current',
+    paidCount: 1,
+    totalCount: 1,
+  });
+  await daretRef.collection('periods').doc('02').collection('contributions').doc('admin').set({
+    payerUid: 'admin',
+    state: 'confirme',
+    amount: 1500,
+    paidDeclaredAt: fixedNow,
+    confirmedAt: fixedNow,
+    confirmedByUid: 'member',
+  });
+  await daretRef.collection('periods').doc('02').collection('contributions').doc('member').set({
+    payerUid: 'member',
+    state: 'recipient',
+    amount: 0,
+    paidDeclaredAt: null,
+    confirmedAt: null,
+    confirmedByUid: null,
+  });
 }
 
 function expectCode(callback: () => unknown, code: string): void {
