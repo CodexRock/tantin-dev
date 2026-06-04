@@ -1,7 +1,7 @@
 # PROGRESS - Sprint S4: Create Wizard + Drag-Drop + Join
 
 **Sprint:** S4 - Create wizard + drag-drop payout ordering + join flow
-**Started:** 2026-06-03     **Status:** Device bug fixes gate PASS; push/CI, Functions deploy, and device retest pending
+**Started:** 2026-06-03     **Status:** Device bug fixes committed/pushed; CI, Functions deploy, and device retest pending
 **Prereqs verified:** Y
 
 ## Objective
@@ -267,12 +267,12 @@ Log overflowed the console, switching to line-by-line logging.
   was already modified before this close-out pass and should not be staged unless
   the user explicitly asks.
 - S4 implementation is committed through `a3baca3`; docs-only commit `9024973`
-  is the current parent and was marked `[skip ci]`. The current staged S4
-  device-bug-fix tree corrects period-share math, adds callable auth token
-  refresh, and updates tests/docs after the fresh user-run gate passed.
+  was marked `[skip ci]`. Device-bug-fix commit `80dae7b` corrects period-share
+  math, adds callable auth token refresh, and updates tests/docs after the
+  fresh user-run gate passed. It has been pushed to `origin/main`.
 - CI evidence is **GREEN for `a3baca3`** (run 26917868600, both `verify` and
   `backend` jobs green, confirmed by the user and pasted below). Do not claim a
-  separate CI run for `9024973` or for the current device-bug-fix tree until
+  separate CI run for `9024973`, `80dae7b`, or the latest pushed HEAD until
   `dart run tool/check_ci.dart` proves it.
 - Verification review found and fixed one S4 UI bug in the group split editor:
   the open split sheet now redraws live while +/- changes shares. User-run
@@ -341,9 +341,9 @@ plus the `backend` job = Firestore/Storage rules tests + Functions Jest. Both jo
 - `587987e` fix(build): drop riverpod codegen for manual Riverpod 2 providers on analyzer 10
 - `a3baca3` feat(daret): S4 create wizard + drag-drop payout + join-by-code + approval
 - `9024973` docs(s4): record codegen-fix gate PASS + CI green (run 26917868600) [skip ci]
-- Current uncommitted verification fix: group split sheet live-redraw fix + widget regression test.
-- Pushed to `origin/main` through `9024973`; CI run 26917868600 = success for app commit `a3baca3`
-  (docs-only `9024973` skipped CI).
+- `80dae7b` fix(daret): correct S4 period-share math
+- Pushed to `origin/main` through `80dae7b`; CI run 26917868600 = success for app commit `a3baca3`
+  (docs-only `9024973` skipped CI). CI proof for `80dae7b` / the latest pushed HEAD is still pending.
 
 ## Definition of Done gate
 - [ ] Every task above is implemented and verified
