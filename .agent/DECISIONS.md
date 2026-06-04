@@ -207,3 +207,34 @@
   keepAlive `NotifierProvider`s (were `@Riverpod(keepAlive: true)`); `routerProvider` is a keepAlive
   `Provider<GoRouter>`. Deleted the S0 throwaway smoke files (`lib/core/models/smoke_model.dart`,
   `lib/core/providers/smoke_provider.dart`).
+
+## D026: Single-name users are first-class — `nom` (last name) is optional everywhere
+- **Decision:** A user's last name (`nom`) is OPTIONAL across the whole stack. The profile setup may be
+  completed with only a Prénom; the client writes `nom: ''`, builds `name` from the prénom alone, and
+  derives single-letter `initials`. Cloud Functions MUST tolerate an empty `nom`: `readRequiredProfile`
+  reads it with `optionalString(data, 'nom') ?? ''` (NOT `requireString`, which rejects empty strings),
+  mirroring `readPendingDraftProfile`. Only `prenom`, `name`, `initials`, `phone`, and `avatarPalette`
+  are required on a person profile.
+- **Rationale:** Moroccan single-name reality + the product's "don't over-ask" philosophy. A
+  `requireString('nom')` in `readRequiredProfile` broke `joinDaret` on-device for any single-name user
+  with `failed-precondition: nom must be a string` (the daret creator didn't hit it because that account
+  had a full name). The client already treated `nom` as optional; the backend was the inconsistent side.
+- **Guard:** jest regression `joinDaret accepts a single-name user (empty nom)`; `seedUser` takes an
+  optional `nom`. Never reintroduce `requireString` on a person's `nom`. (The daret's own `nom` — its
+  name — stays required; that is a different field.)
+
+## D027 (operational): Gen-2 callables need an `allUsers` Cloud Run invoker binding
+- **Decision:** Every client-invoked callable (Functions v2 = Cloud Run service) must have
+  `allUsers` granted `roles/run.invoker`. `firebase deploy` normally sets this, but it can silently fail
+  to apply (org-policy default / partial first deploy) and will NOT re-apply it on an unchanged/skipped
+  redeploy. When a new callable is first invoked from a device and returns raw
+  `[firebase_functions/unauthenticated] UNAUTHENTICATED` (no handler message), grant it:
+  `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers --role=roles/run.invoker
+  --region=europe-west1 --project=tantin-dev`. Triggers (`onContributionWritten`, `onMemberCreated`,
+  `dailyReminders`) must NOT get this binding — they are invoked by Eventarc/Scheduler service accounts.
+- **Why it's safe:** public-invoke only lets the request *reach* the function; real authN/authZ is
+  enforced in-code (`parseCallable` requires `request.auth.uid`) + Firestore rules + (S6) App Check. This
+  is the standard Firebase callable architecture, not an exposure.
+- **Why the gate can't catch it:** deployed IAM lives in GCP, outside the repo — `verify.dart`, CI, the
+  rules tests, and the jest suite never touch it. Only the first real on-device invocation surfaces it.
+  S5/S6 agents: after deploying any new callable, verify its invoker binding on first device call.

@@ -126,61 +126,37 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
 - Dependency set is just-in-time. Remaining packages (confetti is in via motion; contacts/image-picker/permissions, mocktail, fake_cloud_firestore, integration_test) are added in the sprint that first needs them.
 - Do not commit service-account JSON keys or FCM server keys.
 
-## What's Done / What's Next
-- **Current checkpoint override (2026-06-04):** S4 create wizard / drag-drop assignment / join + approval
-  is implemented and committed through `a3baca3`; CI run 26917868600 was GREEN for the app `verify` job and
-  backend job (confirmed by the user). A later docs-only commit `9024973` skipped CI.
-- **S4 device bug fix committed/pushed:** physical-device testing found incorrect period-share math and
-  `[firebase_functions/unauthenticated]` on `startDaret`. Commit `80dae7b` fixes the math model: gross
-  cagnotte = base amount * period count, period payout = base amount * (period count - 1), and grouped
-  recipients split one period share for both monthly payments and payouts. A callable auth guard now
-  force-refreshes the Firebase ID token before each callable. `npm test` is PASS after this fix, the
-  user-run `dart run tool/verify.dart` is PASS for this tree, and CI run 26922657221 is GREEN for pushed
-  HEAD `1673c1c`. User reports `firebase deploy --only functions --project tantin-dev` has been run, but
-  deploy output was not pasted; physical-device retest is still required.
-- **Supersedes older bullets below:** the previous S3/S4 handoff notes in this section are historical and
-  should not be used as the current state.
+### Known device blockers (infra/contract — the gate & CI CANNOT catch these; only on-device proves them)
+- **Callable returns raw `[firebase_functions/unauthenticated] UNAUTHENTICATED` (no handler message) →
+  missing Cloud Run invoker binding (D027).** Gen-2 callables are Cloud Run services; a new/first-invoked
+  one may have an empty IAM policy so `allUsers` can't invoke, and Cloud Run rejects before our code runs.
+  Fix: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
+  --role=roles/run.invoker --region=europe-west1 --project=tantin-dev`. This is the standard callable
+  model (real auth is in `parseCallable` + rules), not an exposure. Do NOT bind the triggers
+  (onContributionWritten/onMemberCreated/dailyReminders). **S5 deploys 4 new callables (advancePeriod,
+  closePeriod, closeDaret, sendNudge) — grant their invoker bindings on first device call.** If instead
+  the error carries a *message* (e.g. "Authentication is required."), it's our handler → a real client
+  auth issue.
+- **Callable returns `[firebase_functions/failed-precondition] nom must be a string` → empty last name
+  (D026).** `nom` is optional by product design; the backend tolerates `nom: ''`. Never `requireString`
+  a person's `nom`. (Fixed in `readRequiredProfile`; jest regression covers it.)
 
-- **Current checkpoint:** S3 **Part 4 read screens are done and CI-green** (commit `7b2ead0`, run
-  26881095108: `verify` + `backend` both success). The 5-tab shell is real — Accueil (hero next-action
-  + Ce mois-ci summary + active darets), Mes Darets (segmented), Calendrier (period agenda), Activité
-  (merged log), Profil (stats + settings + logout), plus Notifications and a read-only daret hub stub.
-  Global « + » FAB → Créer/Rejoindre sheet with a **debug-only `seedDev`** action. All from the S1
-  design system + live Firestore streams. `dart run tool/verify.dart` → GATE: PASS (47 tests).
-- **Remaining to close S3:** (a) per-screen **golden tests** — add the test files, then run
-  `flutter test --update-goldens` once to bake baselines (local-only, D011); (b) a device walkthrough
-  (seed → Yasmine sees all 5 tabs matching the prototype); (c) finalize this file + `PROGRESS_S3`;
-  (d) architect final S3 audit + sign-off.
-- **Done:** S0 setup; S1 design system; S2 auth & onboarding; S3 Parts 1–3 (domain + least-privilege
-  rules + indexes + repositories + the 13-Function backend, deployed to `tantin-dev`, rules+functions
-  emulator tests green in CI).
-- **Next sprints:** S4 (create wizard / drag-drop / join — wires `startDaret`/`createInvite`/
-  `joinDaret`/`approveDaret`), S5 (daret hub + two-sided confirmation + payout — replaces the stub),
-  S6 (FCM notifications + polish + release).
-
-## S4 Handoff - 2026-06-03
-- **Backend committed:** `8fd9341 feat(functions): expand S4 daret drafts`. This adds the S4 draft
-  expansion contract: the client creates one rules-allowed draft root with `draftMembers` and
-  `draftPeriods`; `startDaret` expands it into server-owned member/period docs; `joinDaret` replaces a
-  generic `pending_*` placeholder with the real caller UID. Root rules and emulator tests were updated.
-- **Flutter UI implemented but uncommitted:** create wizard, drag/drop payout ordering, group split
-  editor, createDraft -> startDaret -> createInvite flow, join preview/confirm, approval review,
-  approve button, and share_plus invite sharing. S4 feature tests and goldens were added under
-  `test/features/create_daret/` and `test/features/join_daret/`.
-- **Last proven S4 Flutter evidence before the blocker:** targeted S4 analyze passed; S4 golden update
-  passed; `flutter test test\features\create_daret test\features\join_daret` passed with 8 tests. See
-  `.agent/PROGRESS_S4.md` for exact pasted output.
-- **Current blocker:** canonical `dart run tool/verify.dart` is NOT green. It stalls/fails in the
-  `Codegen reproduces` step. Isolated
-  `dart run build_runner build --delete-conflicting-outputs` logs
-  `Missing implementation of visitDotShorthandInvocation` from analyzer while `riverpod_generator`
-  processes `lib/core/router/router.dart`, plus
-  `SDK language version 3.11.0 is newer than analyzer language version 3.9.0`.
-- **Important uncommitted experiment:** `lib/core/router/router.dart` was converted from generated
-  `@riverpod GoRouter router` to a manual `Provider<GoRouter>` preserving `routerProvider`. This did
-  not fix the build_runner blocker. The next agent should decide whether to keep it or revert it after
-  resolving the analyzer/tooling issue.
-- **Dirty worktree warning:** `.agent/PROGRESS_S3.md` was already dirty before S4 work. Do not stage it
-  unless explicitly instructed. S4 UI/tests/docs are also dirty and uncommitted.
-- **No DoD completion claim is valid yet:** no final local gate, deploy, device E2E, push, or CI proof
-  has been completed after the S4 Flutter work.
+## What's Done / What's Next (current — 2026-06-04)
+- **Done through S4 — on-device proven.** S0 setup; S1 design system; S2 auth & onboarding; S3 (5-tab
+  read shell + read-only daret-hub stub + Notifications + the 13-Function backend on `tantin-dev`);
+  **S4 (create wizard + drag-drop payout ordering + group split + invite/share + join-by-code + preview
+  + approval).** The full create→start→invite→join→approve loop is verified end-to-end on a physical
+  Android device through to daret activation. Toolchain is post-D025 (manual Riverpod 2 providers,
+  analyzer 10); App Check OFF in dev (D022). See `PROGRESS_S4.md` for the signed-off close-out + evidence.
+- **Two device-only blockers were found & fixed during the S4 walkthrough** (both are now in
+  "Known device blockers" above): Cloud Run invoker IAM (D027) and optional `nom` (D026). Lesson:
+  deployed infra + client/backend data contracts live outside the repo, so the gate/CI/emulator can pass
+  green while a real device fails — the device walkthrough is a required, non-skippable gate.
+- **Next: S5 — daret hub + two-sided confirmation + payout + admin** (`build_plan/prompts/
+  S5_hub_confirmation_payout_admin.md`). It replaces the read-only hub stub with the live hub, the
+  `apayer→attente→confirmé` two-sided lifecycle (« J'ai payé ma part » / « Reçu »), « Relancer » nudges,
+  the payout celebration + clôture, and the admin tools. S5 deploys 4 new callables (advancePeriod,
+  closePeriod, closeDaret, sendNudge) — **grant their Cloud Run invoker bindings on first device call**
+  (D027). Put a hard security checkpoint on the confirmation core (rules must deny non-recipient/
+  non-admin confirms and cross-member declares).
+- **Then S6 — FCM notifications + polish + release**, which also RE-ENABLES App Check (reverses D022).
