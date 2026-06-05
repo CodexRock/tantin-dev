@@ -321,6 +321,7 @@ gcloud run services add-iam-policy-binding approvememberfor --member=allUsers --
 
 ## Commits this sprint
 - 99a3c1b feat(darets): build live daret hub
+- ee4cb7a feat(admin): fix follow-up admin flows
 
 ## ── DEFINITION OF DONE (gate) ──
 > Legend: `[x]` done & verified this session · `[~] BLOCKED: reason` · `[ ]` not yet.
@@ -336,7 +337,7 @@ gcloud run services add-iam-policy-binding approvememberfor --member=allUsers --
 - [x] New/changed UI visually matches the prototype; golden coverage decision recorded (D029: admin sheets covered by interaction widget tests + device walkthrough, no new alchemist golden — conscious choice per the brief, like the S3 read screens)
 - [ ] App builds & touched flows run on Android without runtime errors (device walkthrough pasted)
 - [x] `CONTEXT.md`, `DECISIONS.md`, this file are updated & accurate
-- [ ] All work committed (per task) and pushed; commit hashes listed above
+- [x] All work committed and pushed; commit hashes listed above
 - [x] No secrets/private keys committed; App Check NOT touched (stays OFF in dev per D022)
 - [ ] Cloud config changes deployed & verified live; new-callable invoker bindings granted (D027)
 - [ ] "Sprint S5 complete — ready for architect audit" posted to the user (with pasted gate result + CI link)
