@@ -292,6 +292,14 @@ describe('members and periods', () => {
     await assertFails(updateDoc(payerMember, { role: 'admin' }));
   });
 
+  test('admin cannot approve another member through client writes', async () => {
+    await assertFails(
+      updateDoc(doc(db('admin'), 'darets/d1/members/payer'), {
+        approvalStatus: 'approved',
+      }),
+    );
+  });
+
   test('nested server-owned documents cannot be client-created', async () => {
     await assertFails(
       setDoc(doc(db('admin'), 'darets/d1/members/forged'), member('forged')),

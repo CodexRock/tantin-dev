@@ -45,6 +45,12 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - [x] T12 — Every S5 Function wired (sendNudge, advancePeriod, closePeriod, closeDaret, onContributionWritten + Part-4 reorderPeriods/replaceMember/editDaretDetails/deleteDaret); aggregates/activity verified by emulator tests (24 functions tests green)
 - [x] T13 — Tests + docs (CONTEXT/DECISIONS/this file) done; goldens decision recorded (D029: interaction widget tests + device walkthrough, no new alchemist golden)
 
+### Follow-up batch - 2026-06-05 (post-Part-4 admin)
+- [x] T14 - Delete-confirmation bugs fixed: keyboard-aware `_ActionSheetShell`; stable `SUPPRIMER` type-to-confirm guard with autocorrect/suggestions disabled
+- [x] T15 - Admin approves another pending member through Function-only `approveMemberFor`; self-only client rule remains locked
+- [x] T16 - Admin fills a freed `pending_*` invitation seat from the shared create-step-3 participant/contact picker; existing app-user fills reuse `replaceMember`
+- [ ] T17 - Follow-up close-out: commit/push, deploy Functions, D027 binding for `approvememberfor`, CI green, physical-device walkthrough, final evidence docs
+
 ## Work log
 - 2026-06-04 12:07 — Read operating manual, CONTEXT, DECISIONS, S5 prompt, and prototype sources (`hub.jsx`, `hub2.jsx`, `app.jsx`). Confirmed baseline HEAD `710a140` (S5 progress skeleton) with S4 sign-off at `8158fc4`. Began Part 1 only per sprint gate. commit: 99a3c1b
 - 2026-06-04 12:07 — Replaced the read-only hub stub with `DaretHubScreen`: live header, current-period beneficiary card, contributor checklist/state actions (UI-only until Part 2), progress ring, Périodes/Membres/Activité tabs, and router wiring. Added focused widget test `test/features/darets/presentation/daret_hub_screen_test.dart`. Gate pending user-run `dart run tool\verify.dart` (sprint brief forbids agent-run Dart/npm/Firebase/gcloud). commit: 99a3c1b
@@ -59,6 +65,20 @@ Design source: `../src/hub.jsx`, `../src/hub2.jsx`, `../src/app.jsx` sheets (Con
 - 2026-06-04 — Close-out: CI GREEN for b4331dc; `firebase deploy --only functions --project tantin-dev` complete (4 new callables created); D027 invoker bindings granted for all 8 device-invoked services. First device walkthrough surfaced two issues, both fixed in `7874c06` (UI-only, no redeploy): (1) RenderFlex overflow in contribution rows with two action buttons on a 360dp screen — wrapped trailing actions in `Flexible` so they wrap; (2) "Réorganiser/Remplacer" were offered on a non-active daret → confusing "Only active darets…" backend rejection (only those two active-only ops failed, edit/delete would have worked) → menu now shows those rows only when `statut == actif`. Re-gate GREEN. Pending: CI for 7874c06 + device re-test on the active daret.
 - 2026-06-04 — Part 4 local verification GREEN. User ran `npm run test:functions` → **24 passed** (incl. the 6 new admin-management tests), `npm run test:rules` → **25 passed** (the new active-daret-structural-ops deny test among them; the PERMISSION_DENIED console warns are the expected deny cases), and `dart run tool\verify.dart` → **GATE: PASS** (No issues found!, 68 tests). One ts-jest test-only type error (two-element `shares` literals narrowed away from `Record<string,number>`) fixed with a `PeriodAssignment[]` annotation; six analyzer infos fixed (4× null-aware map elements `'k': ?x`, 1× double-quote to drop a `\'` escape, 1× import ordering). Checked T10–T13. Remaining for DoD: commit/push, deploy + D027 grants, CI green, device walkthrough.
 - 2026-06-04 — Began Part 4 (admin). Matched the prototype admin inventory (`hub2.jsx` `Gerer`/`PeriodManage`/`AdminSheets`). Per the CRITICAL write-path rules, EVERY active-daret structural op is Function-only — no rules loosened. Added four admin callables to `functions/src/index.ts` (`reorderPeriods`, `replaceMember`, `editDaretDetails`, `deleteDaret`), extended `joinDaret` to complete a re-invite into an active daret, and added a `placeholderProfile` helper. Decisions recorded as D028 (ops/scope, incl. "Mettre en pause" deferral + "adjust amounts" folded into `reorderPeriods`) and D029 (goldens → interaction widget tests + device walkthrough, no new alchemist golden). UX fork on "Remplacer un membre" resolved with the user → **re-invite placeholder** mode. Wired the hub header gear (`onManage`) to a `_AdminMenuSheet` + sub-sheets (edit details form, drag-to-reorder upcoming tours, replace-member picker→confirm→share-code, type-to-confirm delete). Added `DaretCallableRepository` methods. Tests added: 6 functions tests (admin describe block + 2 seed helpers), 1 rules deny test ("admin has no client path for active-daret structural ops"), 4 hub widget tests (manage sheet, delete guard, edit pre-fill, replace candidate list). Period management (T11 advance/close) is already served by the En-cours tab from Part 2/3. **No boxes checked — pending user-run `dart format`, `npm run test:functions`, `npm run test:rules`, `dart run tool\verify.dart`.**
+
+- 2026-06-05 - Follow-up batch implemented. Backend: added `approveMemberFor` and extracted shared activation from `approveDaret`; reused `replaceMember` for app-user placeholder fills; restored live `apayer` contribution/`totalCount` when a vacant active seat becomes real; retired filled invites; locked active invite-code fills behind the same D030 no-payment/no-advance gate. UI: delete sheet uses `SUPPRIMER` and keyboard-aware shared sheet chrome; member rows show admin-only `Approuver`; invitation rows are admin-only tappable and open contact/share choices; create step-3 participant picker was extracted and reused. Rules unchanged except deny-test coverage. Decisions recorded as D031-D033.
+- 2026-06-05 - User-run local verification GREEN for follow-up. `npm run test:functions` passed with **32 tests**. `npm run test:rules` passed (including the new admin-cannot-client-approve-another-member deny case). `dart format lib test` reported **0 changed**. `dart run tool\verify.dart` printed **GATE: PASS** with `flutter analyze --fatal-infos` "No issues found!" and `flutter test` **+73: All tests passed**. Remaining for T17: commit/push, deploy, D027 binding for `approvememberfor`, CI proof, and device walkthrough.
+- 2026-06-05 - Device-feedback fix in progress. Owner reported: `Réorganiser` on a 3-member unpaid daret showed only tours 2/3; `approveMemberFor` returned Function not found on device; `replaceMember` hit the old live "Only active..." backend error. Code fix: period 1 is now included in reorder while no payment is recorded; `reorderPeriods` can rewrite period 1 and reseeds live current contributions; `replaceMember` treats only closed/advanced turns as served and can replace the current unpaid recipient. D034 records the refined rule. `approveMemberFor` still requires Functions deploy + D027 binding before device retest.
+- 2026-06-05 - User-run verification GREEN after D034 device fix. Focused hub widget test:
+  `flutter test test\features\darets\presentation\daret_hub_screen_test.dart` -> **00:13 +15: All tests passed**.
+  Canonical gate: `dart run tool\verify.dart` -> **GATE: PASS**, analyze **No issues found**, Flutter tests
+  **00:37 +74: All tests passed**. Functions emulator: `npm run test:functions` -> **33 passed**, including
+  `reorderPeriods can swap the first unpaid tour and reseeds current contributions` and
+  `replaceMember can swap the current recipient before payment is recorded`. Remaining: `npm run test:rules`,
+  commit/push, deploy Functions, D027 `approvememberfor`, CI, and device retest.
+- 2026-06-05 - User-run rules verification GREEN after D034 device fix. `npm run test:rules` passed:
+  **2 suites passed, 26 tests passed**. Console PERMISSION_DENIED warnings are expected deny-case assertions.
+  Remaining: commit/push, deploy Functions, D027 `approvememberfor`, CI, and device retest.
 
 ## Verification evidence (PASTE REAL OUTPUT — no adjectives, per the Prime Directive)
 
@@ -173,6 +193,70 @@ Tests:       25 passed, 25 total
 GATE: PASS ✅  — safe to check DoD boxes.
 ```
 
+### S5 admin follow-up Functions tests - `npm run test:functions`
+```
+PASS  test/index.test.ts
+Test Suites: 1 passed, 1 total
+Tests:       32 passed, 32 total
+```
+
+### D034 device-fix Functions tests - `npm run test:functions`
+```
+PASS  test/index.test.ts (25.118 s)
+  admin management (Part 4)
+    √ reorderPeriods can swap the first unpaid tour and reseeds current contributions (416 ms)
+    √ reorderPeriods works before activation (attente daret) (404 ms)
+    √ replaceMember swaps an unserved member and rejects admin/non-admin (460 ms)
+    √ replaceMember can swap the current recipient before payment is recorded (431 ms)
+Test Suites: 1 passed, 1 total
+Tests:       33 passed, 33 total
+```
+
+### S5 admin follow-up rules tests - `npm run test:rules`
+```
+PASS  rules-tests/firestore.rules.test.cjs
+PASS  rules-tests/storage.rules.test.cjs
+(incl. admin cannot client-write another member's approvalStatus; PERMISSION_DENIED console warns are the asserted deny cases)
+```
+
+### D034 device-fix rules tests - `npm run test:rules`
+```
+PASS  rules-tests/firestore.rules.test.cjs (15.127 s)
+PASS  rules-tests/storage.rules.test.cjs
+Test Suites: 2 passed, 2 total
+Tests:       26 passed, 26 total
+```
+
+### S5 admin follow-up canonical gate - `dart run tool\verify.dart`
+```
+dart format lib test
+Formatted 111 files (0 changed) in 0.82 seconds.
+
+dart run tool\verify.dart
+  ✅  Resolve dependencies
+  ✅  Generate l10n
+  ✅  Codegen reproduces
+  ✅  Format check
+  ✅  Static analysis      (No issues found!)
+  ✅  Tests                (00:28 +73: All tests passed!)
+GATE: PASS ✅  — safe to check DoD boxes.
+```
+
+### D034 device-fix widget/gate evidence
+```
+flutter test test\features\darets\presentation\daret_hub_screen_test.dart
+00:13 +15: All tests passed!
+
+dart run tool\verify.dart
+  ✅  Resolve dependencies
+  ✅  Generate l10n
+  ✅  Codegen reproduces
+  ✅  Format check
+  ✅  Static analysis      (No issues found!)
+  ✅  Tests                (00:37 +74: All tests passed!)
+GATE: PASS ✅  — safe to check DoD boxes.
+```
+
 ### Final canonical gate — `dart run tool/verify.dart` (Part 3, post-fix)
 ```
 ═══════════════════════════════════════════════
@@ -216,14 +300,23 @@ D027 invoker bindings (`allUsers` → `roles/run.invoker`, europe-west1) — to 
 the 8 device-invoked callables: reorderperiods, replacemember, editdaretdetails, deletedaret,
 advanceperiod, closeperiod, closedaret, sendnudge. {paste gcloud results}
 
+### S5 admin follow-up cloud config
+```
+pending:
+firebase deploy --only functions --project tantin-dev
+gcloud run services add-iam-policy-binding approvememberfor --member=allUsers --role=roles/run.invoker --region=europe-west1 --project=tantin-dev
+```
+
 ## Blockers / questions for the user
-- Parts 1–3 done and gate-green. Next: Part 4 (admin) + close-out (CI proof, device walkthrough, goldens decision). Before the device walkthrough, grant the D027 invoker bindings on the 4 S5 callables (see WATCH below).
-- WATCH (D027): on first device call, the S5 callables may return raw
-  `[firebase_functions/unauthenticated] UNAUTHENTICATED` (missing Cloud Run invoker binding).
-  Fix proactively: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
-  --role=roles/run.invoker --region=europe-west1 --project=tantin-dev`. Do NOT bind triggers.
-  Services needing the binding this sprint: `advanceperiod`, `closeperiod`, `closedaret`, `sendnudge`,
-  AND the four Part-4 callables `reorderperiods`, `replacemember`, `editdaretdetails`, `deletedaret`.
+- Follow-up implementation is locally gate-green. Remaining T17 close-out: commit/push, redeploy Functions
+  (the earlier `attente` change plus `approveMemberFor` must go live), grant D027 invoker binding for
+  the new `approvememberfor` Cloud Run service, prove CI green for the pushed commit, and run the
+  physical Android walkthrough.
+- WATCH (D027): on first device call, a new callable may return raw
+  `[firebase_functions/unauthenticated] UNAUTHENTICATED` before the handler runs if Cloud Run invoker is
+  missing. Fix with `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
+  --role=roles/run.invoker --region=europe-west1 --project=tantin-dev`. Do NOT bind triggers. For this
+  follow-up, the only new device-invoked service is `approvememberfor`; no `fillseat` service exists.
 - {others | none}
 
 ## Commits this sprint

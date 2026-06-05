@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tantin_flutter/core/format/date_format.dart';
@@ -13,6 +12,7 @@ import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/features/create_daret/data/create_daret_providers.dart';
 import 'package:tantin_flutter/features/create_daret/domain/create_daret_models.dart';
 import 'package:tantin_flutter/features/create_daret/presentation/create_daret_controller.dart';
+import 'package:tantin_flutter/features/create_daret/presentation/widgets/create_participant_picker.dart';
 import 'package:tantin_flutter/features/darets/data/daret_callable_providers.dart';
 import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_models.dart';
@@ -27,10 +27,6 @@ class CreateDaretScreen extends ConsumerStatefulWidget {
 }
 
 class _CreateDaretScreenState extends ConsumerState<CreateDaretScreen> {
-  List<Contact> _contacts = const <Contact>[];
-  String? _contactsError;
-  bool _loadingContacts = false;
-
   @override
   Widget build(BuildContext context) {
     final appUser = ref.watch(currentAppUserProvider).valueOrNull;
@@ -92,10 +88,6 @@ class _CreateDaretScreenState extends ConsumerState<CreateDaretScreen> {
                       state: state,
                       controller: controller,
                       options: _memberOptions(ref, appUser.uid),
-                      contacts: _contacts,
-                      contactsError: _contactsError,
-                      loadingContacts: _loadingContacts,
-                      onLoadContacts: _loadContacts,
                     ),
                     4 => _OrderStep(
                       state: state,
@@ -147,36 +139,6 @@ class _CreateDaretScreenState extends ConsumerState<CreateDaretScreen> {
       );
     }
   }
-
-  Future<void> _loadContacts() async {
-    setState(() {
-      _loadingContacts = true;
-      _contactsError = null;
-    });
-    try {
-      final allowed = await FlutterContacts.permissions.request(
-        PermissionType.read,
-      );
-      if (allowed != PermissionStatus.granted &&
-          allowed != PermissionStatus.limited) {
-        setState(() {
-          _contactsError = 'Accès aux contacts refusé.';
-          _loadingContacts = false;
-        });
-        return;
-      }
-      final contacts = await FlutterContacts.getAll(limit: 20);
-      setState(() {
-        _contacts = contacts;
-        _loadingContacts = false;
-      });
-    } on Object catch (error) {
-      setState(() {
-        _contactsError = error.toString();
-        _loadingContacts = false;
-      });
-    }
-  }
 }
 
 List<CreateParticipant> _memberOptions(WidgetRef ref, String currentUid) {
@@ -190,63 +152,13 @@ List<CreateParticipant> _memberOptions(WidgetRef ref, String currentUid) {
       if (member.uid == currentUid) continue;
       options.putIfAbsent(
         member.uid,
-        () => CreateParticipant(
-          uid: member.uid,
-          name: member.name,
-          prenom: member.prenom,
-          initials: member.initials,
-          avatarPalette: member.avatarPalette,
-          kind: CreateParticipantKind.previous,
-        ),
+        () => createParticipantFromMember(member),
       );
     }
   }
   if (options.isNotEmpty) return options.values.toList(growable: false);
-  return _seedMemberOptions;
+  return fallbackCreateParticipantOptions;
 }
-
-const _seedMemberOptions = <CreateParticipant>[
-  CreateParticipant(
-    uid: 'seed-person-01',
-    name: 'Karim Tazi',
-    prenom: 'Karim',
-    initials: 'KT',
-    avatarPalette: ['#5247E6', '#E7E5FB'],
-    kind: CreateParticipantKind.app,
-  ),
-  CreateParticipant(
-    uid: 'seed-person-02',
-    name: 'Salma Idrissi',
-    prenom: 'Salma',
-    initials: 'SI',
-    avatarPalette: ['#F5A623', '#FBEFD6'],
-    kind: CreateParticipantKind.app,
-  ),
-  CreateParticipant(
-    uid: 'seed-person-04',
-    name: 'Nadia Bennani',
-    prenom: 'Nadia',
-    initials: 'NB',
-    avatarPalette: ['#2E9E6B', '#DCF0E6'],
-    kind: CreateParticipantKind.app,
-  ),
-  CreateParticipant(
-    uid: 'seed-person-06',
-    name: 'Aïcha Fassi',
-    prenom: 'Aïcha',
-    initials: 'AF',
-    avatarPalette: ['#D2483F', '#F8DAD7'],
-    kind: CreateParticipantKind.app,
-  ),
-  CreateParticipant(
-    uid: 'seed-person-07',
-    name: 'Reda Lahlou',
-    prenom: 'Reda',
-    initials: 'RL',
-    avatarPalette: ['#5247E6', '#E7E5FB'],
-    kind: CreateParticipantKind.app,
-  ),
-];
 
 class _WizardHeader extends StatelessWidget {
   const _WizardHeader({
@@ -550,28 +462,17 @@ class _MembersStep extends StatefulWidget {
     required this.state,
     required this.controller,
     required this.options,
-    required this.contacts,
-    required this.loadingContacts,
-    required this.onLoadContacts,
-    this.contactsError,
   });
 
   final CreateDaretState state;
   final CreateDaretController controller;
   final List<CreateParticipant> options;
-  final List<Contact> contacts;
-  final bool loadingContacts;
-  final VoidCallback onLoadContacts;
-  final String? contactsError;
 
   @override
   State<_MembersStep> createState() => _MembersStepState();
 }
 
 class _MembersStepState extends State<_MembersStep> {
-  var _source = 'amis';
-  var _query = '';
-
   @override
   Widget build(BuildContext context) {
     final participants = widget.state.participants;
@@ -634,117 +535,25 @@ class _MembersStepState extends State<_MembersStep> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              _SearchField(
-                onChanged: (value) => setState(() => _query = value),
-              ),
-              const SizedBox(height: 10),
-              Segmented<String>(
-                value: _source,
-                onChange: (value) => setState(() => _source = value),
-                options: const [
-                  SegmentedOption(value: 'amis', label: 'Amis'),
-                  SegmentedOption(value: 'precedents', label: 'Précédents'),
-                  SegmentedOption(value: 'contacts', label: 'Contacts'),
-                ],
-              ),
             ],
           ),
         ),
         Expanded(
-          child: ListView(
+          child: Padding(
             padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
-            children: [
-              if (_source == 'contacts') ..._contactRows(),
-              if (_source != 'contacts')
-                for (final option in _filteredOptions())
-                  _MemberRow(
-                    participant: option,
-                    selected: selected.contains(option.uid),
-                    onTap: () => widget.controller.toggleParticipant(option),
-                  ),
-            ],
+            child: CreateParticipantPicker(
+              options: widget.options,
+              selectedUids: selected,
+              onParticipantTap: widget.controller.toggleParticipant,
+              onContactTap: (name) => widget.controller.addPendingInvite(
+                displayName: name,
+              ),
+              onAddPendingInvite: widget.controller.addPendingInvite,
+            ),
           ),
         ),
       ],
     );
-  }
-
-  Iterable<CreateParticipant> _filteredOptions() {
-    final query = _query.trim().toLowerCase();
-    return widget.options.where((option) {
-      if (query.isEmpty) return true;
-      return option.name.toLowerCase().contains(query);
-    });
-  }
-
-  List<Widget> _contactRows() {
-    if (widget.loadingContacts) {
-      return const [
-        Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      ];
-    }
-    if (widget.contacts.isEmpty) {
-      return [
-        TnCard(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Invitations en attente',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                ),
-                if (widget.contactsError != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.contactsError!,
-                    style: const TextStyle(color: TantinColors.danger),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                TnButton(
-                  full: true,
-                  variant: ButtonVariant.soft,
-                  icon: TnIcons.contacts(size: 18),
-                  onPressed: widget.onLoadContacts,
-                  child: const Text('Charger les contacts'),
-                ),
-                const SizedBox(height: 10),
-                TnButton(
-                  full: true,
-                  variant: ButtonVariant.ghost,
-                  icon: TnIcons.plus(size: 18),
-                  onPressed: () => widget.controller.addPendingInvite(),
-                  child: const Text('Ajouter une invitation'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ];
-    }
-    final query = _query.trim().toLowerCase();
-    return widget.contacts
-        .where((contact) {
-          final name = contact.displayName ?? '';
-          if (query.isEmpty) return true;
-          return name.toLowerCase().contains(query);
-        })
-        .map((contact) {
-          final name = contact.displayName ?? 'Contact';
-          return _ContactRow(
-            name: name,
-            onTap: () => widget.controller.addPendingInvite(
-              displayName: name,
-            ),
-          );
-        })
-        .toList(growable: false);
   }
 }
 
@@ -1522,116 +1331,6 @@ class _ShareRow extends StatelessWidget {
   }
 }
 
-class _MemberRow extends StatelessWidget {
-  const _MemberRow({
-    required this.participant,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final CreateParticipant participant;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onPressed: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? TantinColors.majorelleSoft : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          children: [
-            Avatar(
-              data: AvatarData(
-                initials: participant.initials,
-                bgColor: participant.avatarColor,
-              ),
-              size: 42,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    participant.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    participant.kind == CreateParticipantKind.self
-                        ? 'vous'
-                        : 'membre inscrit',
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      color: TantinColors.inkMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _CheckBox(selected: selected),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ContactRow extends StatelessWidget {
-  const _ContactRow({required this.name, required this.onTap});
-
-  final String name;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      onPressed: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-        child: Row(
-          children: [
-            const Avatar(
-              data: AvatarData(
-                initials: 'IN',
-                bgColor: TantinColors.saffron,
-                fgColor: TantinColors.ivorySurface,
-              ),
-              size: 42,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                name,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const Text(
-              'inviter',
-              style: TextStyle(
-                color: TantinColors.majorelle,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _CalcCard extends StatelessWidget {
   const _CalcCard({required this.state, required this.dates});
 
@@ -1937,38 +1636,6 @@ InputDecoration _inputDecoration(String hint) {
   );
 }
 
-class _SearchField extends StatelessWidget {
-  const _SearchField({required this.onChanged});
-
-  final ValueChanged<String> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: TantinColors.ivorySunken,
-        borderRadius: BorderRadius.circular(13),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 13),
-          TnIcons.search(size: 18, color: TantinColors.inkMuted),
-          const SizedBox(width: 9),
-          Expanded(
-            child: TextField(
-              onChanged: onChanged,
-              decoration: const InputDecoration(
-                hintText: 'Rechercher',
-                border: InputBorder.none,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ColorSwatch extends StatelessWidget {
   const _ColorSwatch({
     required this.value,
@@ -2131,29 +1798,6 @@ class _ChipButton extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _CheckBox extends StatelessWidget {
-  const _CheckBox({required this.selected});
-
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 26,
-      height: 26,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: selected ? TantinColors.majorelle : Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
-        border: selected
-            ? null
-            : Border.all(color: TantinColors.hairline, width: 2),
-      ),
-      child: selected ? TnIcons.check(size: 16, color: Colors.white) : null,
     );
   }
 }

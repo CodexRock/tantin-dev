@@ -124,6 +124,20 @@ final _periods = <DaretPeriod>[
   ),
 ];
 
+final _firstTourArrangeablePeriods = <DaretPeriod>[
+  _periods[0].copyWith(
+    status: PeriodStatus.current,
+    paidCount: 0,
+    totalCount: 3,
+  ),
+  _periods[1].copyWith(
+    status: PeriodStatus.upcoming,
+    paidCount: 0,
+    totalCount: 3,
+  ),
+  _periods[2],
+];
+
 final Daret _closingDaret = _daret.copyWith(
   currentPeriode: 4,
   prochaineDate: DateTime(2026, 9, 5),
@@ -366,7 +380,7 @@ void main() {
     expect(find.text('Verrouillé après le 1er paiement'), findsNWidgets(2));
   });
 
-  testWidgets('delete guard stays locked until the daret name is typed', (
+  testWidgets('delete guard stays locked until SUPPRIMER is typed', (
     tester,
   ) async {
     await tester.pumpWidget(_host());
@@ -379,12 +393,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Supprimer ce daret ?'), findsOneWidget);
+    expect(find.text('Tapez « SUPPRIMER » pour confirmer'), findsOneWidget);
     final locked = tester.widget<TnButton>(
       find.widgetWithText(TnButton, 'Supprimer définitivement'),
     );
     expect(locked.disabled, isTrue);
 
     await tester.enterText(find.byType(TextField), 'Daret Famille');
+    await tester.pumpAndSettle();
+    final stillLocked = tester.widget<TnButton>(
+      find.widgetWithText(TnButton, 'Supprimer définitivement'),
+    );
+    expect(stillLocked.disabled, isTrue);
+
+    await tester.enterText(find.byType(TextField), ' supprimer ');
     await tester.pumpAndSettle();
     final unlocked = tester.widget<TnButton>(
       find.widgetWithText(TnButton, 'Supprimer définitivement'),
@@ -407,12 +429,33 @@ void main() {
     expect(find.text('Daret Famille'), findsWidgets);
   });
 
+  testWidgets('reorder sheet includes the first unpaid tour', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        daret: _daret.copyWith(currentPeriode: 1),
+        periods: _firstTourArrangeablePeriods,
+        contributions: _arrangeableContributions,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('hub-admin-gear')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Réorganiser l'ordre"));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Karim'), findsWidgets);
+    expect(find.text('Yasmine'), findsWidgets);
+    expect(find.text('Salma & Reda'), findsOneWidget);
+  });
+
   testWidgets('replace member lists only not-yet-served members', (
     tester,
   ) async {
     await tester.pumpWidget(
       _host(
         daret: _daret.copyWith(currentPeriode: 1),
+        periods: _firstTourArrangeablePeriods,
         contributions: _arrangeableContributions,
       ),
     );
@@ -424,22 +467,113 @@ void main() {
     await tester.tap(find.text('Remplacer un membre'));
     await tester.pumpAndSettle();
 
-    // salma & reda hold an upcoming turn; karim already received in period 1.
+    // Before the first payment, the current recipient is still editable.
+    expect(find.text('Karim Tazi'), findsOneWidget);
     expect(find.text('Salma Idrissi'), findsOneWidget);
     expect(find.text('Reda Mansouri'), findsOneWidget);
-    expect(find.text('Karim Tazi'), findsNothing);
+  });
+
+  testWidgets('admin sees approve action for a pending member', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(
+        daret: _daret.copyWith(
+          statut: DaretStatus.attente,
+          currentPeriode: 1,
+          memberUids: const ['admin', 'karim'],
+        ),
+        members: [
+          _members[0],
+          _members[1].copyWith(approvalStatus: ApprovalStatus.pending),
+        ],
+        contributions: const <Contribution>[],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Membres'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Karim Tazi'), findsOneWidget);
+    expect(find.text('Approuver'), findsOneWidget);
+  });
+
+  testWidgets('non-admin does not see approve action for pending members', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(
+        user: _payerUser,
+        daret: _daret.copyWith(
+          statut: DaretStatus.attente,
+          currentPeriode: 1,
+          memberUids: const ['admin', 'karim'],
+        ),
+        members: [
+          _members[0],
+          _members[1].copyWith(approvalStatus: ApprovalStatus.pending),
+        ],
+        contributions: const <Contribution>[],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Membres'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Karim Tazi (vous)'), findsOneWidget);
+    expect(find.text('Approuver'), findsNothing);
+  });
+
+  testWidgets('admin can tap an invitation seat to open the picker', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_hostWithInvitationSeat());
+    await tester.pumpAndSettle();
+    await _dismissPayoutTakeover(tester);
+
+    await tester.tap(find.text('Membres'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choisir'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Place libre'), findsOneWidget);
+    await tester.tap(find.text('Choisir dans mes contacts'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choisir une personne'), findsOneWidget);
+    await tester.tap(find.text('Contacts'));
+    await tester.pumpAndSettle();
+    expect(find.text('Charger les contacts'), findsOneWidget);
+  });
+
+  testWidgets('invitation seat is inert for non-admin members', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _hostWithInvitationSeat(user: _payerUser, currentRecipientUid: 'admin'),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Membres'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Invitation'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Place libre'), findsNothing);
+    expect(find.text('Choisir'), findsNothing);
   });
 }
 
 Widget _host({
   AppUser? user,
   Daret? daret,
+  List<DaretMember>? members,
   List<DaretPeriod>? periods,
   List<Contribution>? contributions,
   List<ActivityEvent>? activity,
 }) {
   final hostUser = user ?? _user;
   final hostDaret = daret ?? _daret;
+  final hostMembers = members ?? _members;
   final hostPeriods = periods ?? _periods;
   final hostContributions = contributions ?? _contributions;
   final hostActivity = activity ?? _activity;
@@ -448,8 +582,9 @@ Widget _host({
       currentAppUserProvider.overrideWith((ref) => Stream.value(hostUser)),
       daretProvider(_daretId).overrideWith((ref) => Stream.value(hostDaret)),
       daretMembersProvider(_daretId).overrideWith(
-        (ref) => Stream.value(_members),
+        (ref) => Stream.value(hostMembers),
       ),
+      myDaretsProvider.overrideWith((ref) => Stream.value(const <Daret>[])),
       periodsProvider(
         _daretId,
       ).overrideWith((ref) => Stream.value(hostPeriods)),
@@ -469,6 +604,62 @@ Widget _host({
         child: DaretHubScreen(daretId: _daretId),
       ),
     ),
+  );
+}
+
+Widget _hostWithInvitationSeat({
+  AppUser? user,
+  String currentRecipientUid = 'karim',
+}) {
+  const invitation = DaretMember(
+    uid: 'pending_7k2p',
+    role: MemberRole.member,
+    approvalStatus: ApprovalStatus.pending,
+    name: 'Invitation',
+    prenom: 'Invitation',
+    initials: 'IN',
+    avatarPalette: ['#F5A623', '#FBEFD6'],
+  );
+  return _host(
+    user: user,
+    daret: _daret.copyWith(
+      currentPeriode: 1,
+      inviteCode: 'TANTIN-7K2P',
+      memberUids: const ['admin', 'karim', 'pending_7k2p'],
+    ),
+    members: [_members[0], _members[1], invitation],
+    periods: [
+      _periods[0].copyWith(
+        status: PeriodStatus.current,
+        recipientUids: [currentRecipientUid],
+        shares: {currentRecipientUid: 100},
+      ),
+      _periods[1].copyWith(
+        index: 2,
+        id: '02',
+        recipientUids: const ['admin'],
+        shares: const {'admin': 100},
+        status: PeriodStatus.upcoming,
+      ),
+      _periods[2].copyWith(
+        index: 3,
+        id: '03',
+        recipientUids: const ['pending_7k2p'],
+        shares: const {'pending_7k2p': 100},
+      ),
+    ],
+    contributions: [
+      Contribution(
+        payerUid: currentRecipientUid,
+        state: ContributionState.recipient,
+        amount: 0,
+      ),
+      Contribution(
+        payerUid: currentRecipientUid == 'admin' ? 'karim' : 'admin',
+        state: ContributionState.apayer,
+        amount: 1500,
+      ),
+    ],
   );
 }
 

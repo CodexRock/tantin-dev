@@ -58,6 +58,15 @@ describe('callable guards', () => {
         }),
       'invalid-argument',
     );
+    expectCode(
+      () =>
+        parseCallable(__testables.schemas.approveMemberForInput, {
+          data: {daretId: 'd1'},
+          auth: {uid: 'u1'},
+          app: {appId: 'app'},
+        }),
+      'invalid-argument',
+    );
   });
 });
 
@@ -405,6 +414,89 @@ describe('daret state integrity', () => {
     );
   });
 
+  test('approveMemberFor lets admin approve another pending member', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('member', 'Member');
+    await seedUser('other', 'Other');
+    await seedDraftDaret('d1', ['admin', 'member', 'other'], 'admin', 3, 'attente', 'pending');
+    await db.collection('darets').doc('d1').update({currentPeriode: 1});
+    await db.collection('darets').doc('d1').collection('members').doc('admin').update({
+      approvalStatus: 'approved',
+    });
+
+    const result = await __testables.approveMemberForHandler(
+      ctx('admin', {daretId: 'd1', memberUid: 'member'}),
+      deps(),
+    );
+
+    expect(result).toEqual({activated: false});
+    const member = await db.collection('darets').doc('d1').collection('members').doc('member').get();
+    expect(member.data()?.approvalStatus).toBe('approved');
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.statut).toBe('attente');
+    const activity = await db
+      .collection('darets')
+      .doc('d1')
+      .collection('activity')
+      .doc('member-approved-member')
+      .get();
+    expect(activity.data()).toMatchObject({type: 'membre', actorUid: 'admin'});
+  });
+
+  test('approveMemberFor activates on the last pending member and seeds period 1', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('member', 'Member');
+    await seedDraftDaret('d1', ['admin', 'member'], 'admin', 2, 'attente', 'pending');
+    await db.collection('darets').doc('d1').update({currentPeriode: 1});
+    await db.collection('darets').doc('d1').collection('members').doc('admin').update({
+      approvalStatus: 'approved',
+    });
+    await seedPeriodDocs('d1');
+    await db.collection('darets').doc('d1').collection('periods').doc('01').update({
+      status: 'upcoming',
+    });
+
+    const result = await __testables.approveMemberForHandler(
+      ctx('admin', {daretId: 'd1', memberUid: 'member'}),
+      deps(),
+    );
+
+    expect(result).toEqual({activated: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()).toMatchObject({statut: 'actif', startedAt: fixedNow});
+    const currentPeriod = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
+    expect(currentPeriod.data()).toMatchObject({status: 'current', totalCount: 1});
+    const contribution = await currentPeriod.ref.collection('contributions').doc('member').get();
+    expect(contribution.data()).toMatchObject({payerUid: 'member', state: 'apayer', amount: 1500});
+    const activity = await db.collection('darets').doc('d1').collection('activity').doc('start').get();
+    expect(activity.data()).toMatchObject({type: 'demarre', actorUid: 'admin'});
+  });
+
+  test('approveMemberFor rejects non-admin and illegal pending-state transitions', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('member', 'Member');
+    await seedDraftDaret('d1', ['admin', 'member'], 'admin', 2, 'attente', 'pending');
+
+    await expectCodeAsync(
+      __testables.approveMemberForHandler(ctx('member', {daretId: 'd1', memberUid: 'admin'}), deps()),
+      'permission-denied',
+    );
+
+    await db.collection('darets').doc('d1').update({statut: 'actif'});
+    await expectCodeAsync(
+      __testables.approveMemberForHandler(ctx('admin', {daretId: 'd1', memberUid: 'member'}), deps()),
+      'failed-precondition',
+    );
+    await db.collection('darets').doc('d1').collection('members').doc('member').update({
+      approvalStatus: 'approved',
+    });
+    const idempotent = await __testables.approveMemberForHandler(
+      ctx('admin', {daretId: 'd1', memberUid: 'member'}),
+      deps(),
+    );
+    expect(idempotent).toEqual({activated: false});
+  });
+
   test('closePeriod rejects unconfirmed contributions and advances when all are confirmed', async () => {
     await seedActiveDaretWithContributions('d1', 'attente');
 
@@ -460,7 +552,7 @@ describe('daret state integrity', () => {
 });
 
 describe('admin management (Part 4)', () => {
-  test('reorderPeriods swaps upcoming recipients and rejects non-admin/illegal targets', async () => {
+  test('reorderPeriods can swap the first unpaid tour and reseeds current contributions', async () => {
     await seedReorderDaret('d1');
 
     await expectCodeAsync(
@@ -476,20 +568,7 @@ describe('admin management (Part 4)', () => {
       ),
       'permission-denied',
     );
-    // Cannot touch the current period.
-    await expectCodeAsync(
-      __testables.reorderPeriodsHandler(
-        ctx('admin', {
-          daretId: 'd1',
-          periods: [
-            {index: 1, recipientUids: ['payer'], shares: {payer: 100}},
-          ] as PeriodAssignment[],
-        }),
-        deps(),
-      ),
-      'failed-precondition',
-    );
-    // Assigning an already-served member breaks the once-each invariant.
+    // Assigning a member twice breaks the once-each invariant.
     await expectCodeAsync(
       __testables.reorderPeriodsHandler(
         ctx('admin', {
@@ -507,18 +586,26 @@ describe('admin management (Part 4)', () => {
       ctx('admin', {
         daretId: 'd1',
         periods: [
+          {index: 1, recipientUids: ['payer'], shares: {payer: 100}},
           {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
-          {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+          {index: 3, recipientUids: ['admin'], shares: {admin: 100}},
         ] as PeriodAssignment[],
       }),
       deps(),
     );
 
-    expect(result).toEqual({updated: 2});
+    expect(result).toEqual({updated: 3});
+    const p1 = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
     const p2 = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
     const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p1.data()).toMatchObject({recipientUids: ['payer'], shares: {payer: 100}});
     expect(p2.data()).toMatchObject({recipientUids: ['recipient'], shares: {recipient: 100}});
-    expect(p3.data()).toMatchObject({recipientUids: ['payer'], shares: {payer: 100}});
+    expect(p3.data()).toMatchObject({recipientUids: ['admin'], shares: {admin: 100}});
+    expect(p1.data()).toMatchObject({paidCount: 0, totalCount: 2});
+    const payerContribution = await p1.ref.collection('contributions').doc('payer').get();
+    const adminContribution = await p1.ref.collection('contributions').doc('admin').get();
+    expect(payerContribution.data()).toMatchObject({payerUid: 'payer', state: 'recipient', amount: 0});
+    expect(adminContribution.data()).toMatchObject({payerUid: 'admin', state: 'apayer', amount: 1500});
     const activity = await db
       .collection('darets')
       .doc('d1')
@@ -535,21 +622,24 @@ describe('admin management (Part 4)', () => {
       ctx('admin', {
         daretId: 'd1',
         periods: [
+          {index: 1, recipientUids: ['payer'], shares: {payer: 100}},
           {index: 2, recipientUids: ['recipient'], shares: {recipient: 100}},
-          {index: 3, recipientUids: ['payer'], shares: {payer: 100}},
+          {index: 3, recipientUids: ['admin'], shares: {admin: 100}},
         ] as PeriodAssignment[],
       }),
       deps(),
     );
 
-    expect(result).toEqual({updated: 2});
+    expect(result).toEqual({updated: 3});
+    const p1 = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
     const p2 = await db.collection('darets').doc('d1').collection('periods').doc('02').get();
     const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p1.data()).toMatchObject({recipientUids: ['payer']});
     expect(p2.data()).toMatchObject({recipientUids: ['recipient']});
-    expect(p3.data()).toMatchObject({recipientUids: ['payer']});
+    expect(p3.data()).toMatchObject({recipientUids: ['admin']});
   });
 
-  test('replaceMember swaps an unserved member and rejects served/admin/non-admin', async () => {
+  test('replaceMember swaps an unserved member and rejects admin/non-admin', async () => {
     await seedReplaceDaret('d1');
 
     await expectCodeAsync(
@@ -566,15 +656,6 @@ describe('admin management (Part 4)', () => {
       ),
       'failed-precondition',
     );
-    // payer already received in the closed period 1.
-    await expectCodeAsync(
-      __testables.replaceMemberHandler(
-        ctx('admin', {daretId: 'd1', fromUid: 'payer', toUid: 'newcomer'}),
-        deps(),
-      ),
-      'failed-precondition',
-    );
-
     const result = await __testables.replaceMemberHandler(
       ctx('admin', {daretId: 'd1', fromUid: 'recipient', toUid: 'newcomer'}),
       deps(),
@@ -606,6 +687,29 @@ describe('admin management (Part 4)', () => {
       .collection('contributions')
       .doc('recipient')
       .get();
+    expect(oldContribution.exists).toBe(false);
+  });
+
+  test('replaceMember can swap the current recipient before payment is recorded', async () => {
+    await seedReplaceDaret('d1');
+
+    const result = await __testables.replaceMemberHandler(
+      ctx('admin', {daretId: 'd1', fromUid: 'payer', toUid: 'newcomer'}),
+      deps(),
+    );
+
+    expect(result).toEqual({replaced: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.memberUids).toEqual(['admin', 'newcomer', 'recipient']);
+    const p1 = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
+    expect(p1.data()).toMatchObject({recipientUids: ['newcomer'], totalCount: 2});
+    const newcomerContribution = await p1.ref.collection('contributions').doc('newcomer').get();
+    const oldContribution = await p1.ref.collection('contributions').doc('payer').get();
+    expect(newcomerContribution.data()).toMatchObject({
+      payerUid: 'newcomer',
+      state: 'recipient',
+      amount: 0,
+    });
     expect(oldContribution.exists).toBe(false);
   });
 
@@ -642,12 +746,109 @@ describe('admin management (Part 4)', () => {
     const daret = await db.collection('darets').doc('d1').get();
     expect(daret.data()?.memberUids).toEqual(['admin', 'payer', 'joiner']);
     expect(daret.data()?.statut).toBe('actif');
+    expect(daret.data()?.inviteCode).toBeNull();
     const seat = await db.collection('darets').doc('d1').collection('members').doc('pending_7k2p').get();
     expect(seat.exists).toBe(false);
     const joiner = await db.collection('darets').doc('d1').collection('members').doc('joiner').get();
     expect(joiner.data()).toMatchObject({uid: 'joiner', role: 'member', approvalStatus: 'approved'});
     const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
     expect(p3.data()).toMatchObject({recipientUids: ['joiner'], shares: {joiner: 100}});
+    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
+    expect(liveTour.data()?.totalCount).toBe(2);
+    const contribution = await liveTour.ref.collection('contributions').doc('joiner').get();
+    expect(contribution.data()).toMatchObject({payerUid: 'joiner', state: 'apayer', amount: 1500});
+    const invite = await db.collection('invites').doc('TANTIN-7K2P').get();
+    expect(invite.data()).toMatchObject({active: false, filledByUid: 'joiner'});
+  });
+
+  test('replaceMember fills a placeholder with an app user and restores live contribution', async () => {
+    await seedReplaceDaret('d1');
+    await __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps());
+
+    const result = await __testables.replaceMemberHandler(
+      ctx('admin', {daretId: 'd1', fromUid: 'pending_7k2p', toUid: 'newcomer'}),
+      deps(),
+    );
+
+    expect(result).toEqual({replaced: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.memberUids).toEqual(['admin', 'payer', 'newcomer']);
+    expect(daret.data()?.inviteCode).toBeNull();
+    const pendingSeat = await db.collection('darets').doc('d1').collection('members').doc('pending_7k2p').get();
+    expect(pendingSeat.exists).toBe(false);
+    const member = await db.collection('darets').doc('d1').collection('members').doc('newcomer').get();
+    expect(member.data()).toMatchObject({uid: 'newcomer', approvalStatus: 'approved'});
+    const p3 = await db.collection('darets').doc('d1').collection('periods').doc('03').get();
+    expect(p3.data()).toMatchObject({recipientUids: ['newcomer'], shares: {newcomer: 100}});
+    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
+    expect(liveTour.data()?.totalCount).toBe(2);
+    const contribution = await liveTour.ref.collection('contributions').doc('newcomer').get();
+    expect(contribution.data()).toMatchObject({payerUid: 'newcomer', state: 'apayer', amount: 1500});
+    const invite = await db.collection('invites').doc('TANTIN-7K2P').get();
+    expect(invite.data()).toMatchObject({active: false, filledByUid: 'newcomer'});
+  });
+
+  test('placeholder fill rejects locked arrangements and non-admin callers', async () => {
+    await seedReplaceDaret('d1');
+    await __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps());
+
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('recipient', {daretId: 'd1', fromUid: 'pending_7k2p', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'permission-denied',
+    );
+    await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .doc('admin')
+      .update({state: 'attente'});
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('admin', {daretId: 'd1', fromUid: 'pending_7k2p', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+    await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .doc('admin')
+      .update({state: 'apayer'});
+    await db.collection('darets').doc('d1').update({currentPeriode: 2});
+    await expectCodeAsync(
+      __testables.replaceMemberHandler(
+        ctx('admin', {daretId: 'd1', fromUid: 'pending_7k2p', toUid: 'newcomer'}),
+        deps(),
+      ),
+      'failed-precondition',
+    );
+  });
+
+  test('joinDaret cannot fill an active placeholder after payment is recorded', async () => {
+    await seedReplaceDaret('d1');
+    await __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps());
+    await seedUser('joiner', 'Joiner');
+    await db
+      .collection('darets')
+      .doc('d1')
+      .collection('periods')
+      .doc('01')
+      .collection('contributions')
+      .doc('admin')
+      .update({state: 'attente'});
+
+    await expectCodeAsync(
+      __testables.joinDaretHandler(ctx('joiner', {code: 'TANTIN-7K2P'}), deps()),
+      'failed-precondition',
+    );
   });
 
   test('editDaretDetails updates cosmetics, rejects non-admin, empty and closed darets', async () => {

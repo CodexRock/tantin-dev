@@ -307,3 +307,72 @@
   members (approve-for-others); replacing into a freed seat by picking an existing contact (create
   step-3-style) instead of only re-invite-by-code. Re-invited members who join via the code are added
   **`approved`** (no extra approval step) — the active-daret join path sets approvalStatus approved.
+## D031: Delete confirmation uses a stable keyword and keyboard-aware admin sheets (S5 follow-up)
+- **Decision:** The destructive delete sheet now asks for the fixed uppercase keyword `SUPPRIMER`
+  instead of the daret name. The field disables autocorrect/suggestions, uses uppercase text
+  capitalization, and the guard compares `trim().toUpperCase()` to the keyword. `_ActionSheetShell`
+  now adds `MediaQuery.viewInsets.bottom` to its bottom padding and wraps content in a
+  `SingleChildScrollView`, so delete/edit fields and their primary buttons remain reachable above the
+  Android keyboard.
+- **Rationale:** Matching the daret name was brittle on Android keyboards. A locale-stable destructive
+  keyword keeps a real type-to-confirm guard without depending on user-generated text. Keyboard-aware
+  chrome fixes both delete and edit-details sheets without inventing a new admin visual pattern.
+- **Guard:** widget test `delete guard stays locked until SUPPRIMER is typed`; local gate
+  `dart run tool\verify.dart` printed `GATE: PASS` on 2026-06-05.
+
+## D032: Admin can approve another member only through `approveMemberFor` (S5 follow-up)
+- **Decision:** Added `approveMemberFor({daretId, memberUid})` as a Function-only admin callable.
+  It requires the caller to be the daret admin, operates only while the daret is `attente`, is
+  idempotent for already-approved members, writes member activity when the daret remains pending, and
+  reuses the same extracted activation helper as `approveDaret` when this approval makes every member
+  approved (`statut -> actif`, `startedAt`, period `01` current, current contributions seeded, `demarre`
+  activity). No Firestore rule was loosened; an admin still cannot client-write another member's
+  `approvalStatus`.
+- **Rationale:** Admin-vouched approval is a privileged state transition over Function-owned member and
+  period/contribution state. Reusing the activation helper prevents the self-approval and admin-approval
+  paths from diverging.
+- **D027 follow-up:** new device-invoked callable service `approvememberfor` needs
+  `allUsers`/`roles/run.invoker` after deploy. No `fillSeat` service was added.
+- **Guard:** Functions tests cover non-admin denial, idempotency, simple approval, and activation with
+  seeded contributions/current period. Rules test proves admin client writes to another member's
+  approval are denied. Widget tests cover admin-visible/non-admin-hidden `Approuver`.
+
+## D033: Freed seats are filled by reusing `replaceMember` plus the shared participant picker (S5 follow-up)
+- **Decision:** No new `fillSeat` callable was added. Filling a vacant `pending_*` seat with an existing
+  app user reuses `replaceMember(daretId, fromUid: placeholderUid, toUid: chosenUid)`, preserving the
+  D030 arrangeable gate (`attente|actif`, tour 1, no payment). The create wizard's step-3 participant
+  and contacts UI was extracted into `CreateParticipantPicker` and reused from the hub. Picking an
+  app/previous member fills directly; picking a non-app contact keeps the invitation as an invite and
+  opens the share-code sheet. When an active placeholder is filled by a real user, the live period gets
+  an `apayer` contribution and `totalCount` is restored; the old invite is retired. `joinDaret` now
+  applies the same D030 lock when an invite code fills an active placeholder, so the code path cannot
+  bypass the no-payment/no-advance rule.
+- **Rationale:** `replaceMember` already owns the admin authorization, placeholder identity, period
+  assignment swap, and current-tour contribution semantics. Reusing it avoids another callable surface
+  while keeping all member/period/contribution writes server-owned. Restoring the live contribution is
+  the right behavior: a placeholder owes nothing only while the seat is vacant; a real filled member
+  owes their current-tour share before any payment has been recorded.
+- **Golden coverage:** D029 remains in force. This follow-up used interaction widget tests plus the
+  required device walkthrough rather than a new alchemist golden, because the flow is provider-fed modal
+  state and contact-permission driven.
+- **Guard:** Functions tests cover direct placeholder fill, contribution restoration, invite-code fill
+  parity, locked-state denials, and non-admin denial. Widget tests cover admin tappability and
+  non-admin inert invitation rows.
+
+## D034: First-tour arrangement remains editable until the first payment (S5 follow-up device fix)
+- **Decision:** While the daret is `attente` or `actif`, still on tour 1, and no contribution is in
+  `attente`/`confirme`, the admin can reorganise the full open plan including period 1. The first
+  beneficiary is no longer treated as fixed before money starts moving. When an active period-1
+  assignment changes, `reorderPeriods` rewrites period 1 and reseeds its current contribution docs in
+  the same transaction so recipient/payer rows and `totalCount` match the new arrangement. This
+  supersedes D028/D030's earlier "upcoming only / first beneficiary fixed" note.
+- **Replace parity:** `replaceMember` now treats only closed/advanced periods as already served. A
+  current period-1 recipient can be replaced before any payment is recorded; direct replacement
+  recomputes the live contribution docs, and placeholder mode preserves a vacant current recipient seat
+  until it is filled.
+- **Rationale:** Device feedback showed a 3-member unpaid daret where `Réorganiser` displayed only tours
+  2 and 3, which contradicted the admin mental model. D030's lock is about the first recorded payment,
+  not about creation-time immutability.
+- **Guard:** Functions tests cover first-tour reorder plus live contribution reseeding and replacing the
+  current unpaid recipient. Widget test `reorder sheet includes the first unpaid tour` prevents the UI
+  from hiding tour 1 again.

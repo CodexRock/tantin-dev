@@ -133,15 +133,26 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   Fix: `gcloud run services add-iam-policy-binding <svc-lowercased> --member=allUsers
   --role=roles/run.invoker --region=europe-west1 --project=tantin-dev`. This is the standard callable
   model (real auth is in `parseCallable` + rules), not an exposure. Do NOT bind the triggers
-  (onContributionWritten/onMemberCreated/dailyReminders). **S5 deploys 4 new callables (advancePeriod,
-  closePeriod, closeDaret, sendNudge) — grant their invoker bindings on first device call.** If instead
-  the error carries a *message* (e.g. "Authentication is required."), it's our handler → a real client
+  (onContributionWritten/onMemberCreated/dailyReminders). S5 admin follow-up adds one new
+  device-invoked callable service, `approvememberfor`, which needs the same D027 binding after deploy.
+  No `fillseat` service was added; contact-fill reuses the existing `replacemember` callable. If instead
+  the error carries a *message* (e.g. "Authentication is required."), it's our handler -> a real client
   auth issue.
 - **Callable returns `[firebase_functions/failed-precondition] nom must be a string` → empty last name
   (D026).** `nom` is optional by product design; the backend tolerates `nom: ''`. Never `requireString`
   a person's `nom`. (Fixed in `readRequiredProfile`; jest regression covers it.)
 
-## What's Done / What's Next (current — 2026-06-04)
+## What's Done / What's Next (current — 2026-06-05)
+- **S5 admin follow-up (post-Part-4) is locally gate-green on 2026-06-05.** Delete-confirm sheets are
+  keyboard-aware and use the stable `SUPPRIMER` guard (D031). Admin can approve another pending member
+  through the new Function-only `approveMemberFor` callable (D032). Vacant `pending_*` seats can be
+  filled from the shared create-step-3 participant/contact picker by reusing `replaceMember`; active
+  fills restore the live `apayer` contribution and invite-code fills obey the same D030 lock (D033).
+  Device feedback then refined the D030 lock: before any payment is recorded, period 1 is editable too;
+  `reorderPeriods` reseeds live contribution docs when tour 1 changes, and `replaceMember` can replace
+  the current unpaid recipient (D034). User-run `dart run tool\verify.dart` printed `GATE: PASS` with
+  Flutter tests `+73`; user-run `npm run test:functions` printed `32 passed`. Close-out still requires
+  commit/push, deploy, `approvememberfor` D027 invoker binding, CI proof, and physical-device walkthrough.
 - **Done through S4 — on-device proven.** S0 setup; S1 design system; S2 auth & onboarding; S3 (5-tab
   read shell + read-only daret-hub stub + Notifications + the 13-Function backend on `tantin-dev`);
   **S4 (create wizard + drag-drop payout ordering + group split + invite/share + join-by-code + preview
@@ -158,7 +169,7 @@ The app boots to a real 5-tab shell backed by live Firestore streams. A dev-only
   printed `GATE: PASS` on 2026-06-04; T1–T3 are checked in `PROGRESS_S5.md`.
 - **S5 Parts 1–3 done, gate-green & architect-reviewed (HEAD 0ccbed4):** live hub, two-sided
   confirmation core + Part-2 security checkpoint, payout celebration + clôture.
-- **S5 Part 4 (admin) implemented, pending the gate.** Four Function-only admin callables added
+- **S5 Part 4 (admin) implemented and locally gate-green.** Four Function-only admin callables added
   (`reorderPeriods`, `replaceMember`, `editDaretDetails`, `deleteDaret`) — no rules loosened; the
   active-daret root/period/member/contribution docs stay Function-owned (new rules deny test proves it).
   `joinDaret` extended to complete a re-invite into an active daret. Hub gear → `Gérer le daret` menu +

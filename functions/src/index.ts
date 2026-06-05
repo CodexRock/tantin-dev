@@ -111,6 +111,9 @@ const inviteCodeSchema = z
   .pipe(z.string().regex(INVITE_CODE_PATTERN));
 
 const daretIdInput = z.object({daretId: daretIdSchema}).strict();
+const approveMemberForInput = z
+  .object({daretId: daretIdSchema, memberUid: uidSchema})
+  .strict();
 const inviteInput = z.object({code: inviteCodeSchema}).strict();
 const closePeriodInput = z
   .object({daretId: daretIdSchema, periodIndex: z.number().int().min(1).max(99)})
@@ -153,6 +156,7 @@ const editDaretDetailsInput = z
   .strict();
 
 type DaretIdInput = z.infer<typeof daretIdInput>;
+type ApproveMemberForInput = z.infer<typeof approveMemberForInput>;
 type InviteInput = z.infer<typeof inviteInput>;
 type ClosePeriodInput = z.infer<typeof closePeriodInput>;
 type SendNudgeInput = z.infer<typeof sendNudgeInput>;
@@ -207,6 +211,7 @@ export const createInvite = makeCallable(daretIdInput, createInviteHandler);
 export const previewDaret = makeCallable(inviteInput, previewDaretHandler);
 export const joinDaret = makeCallable(inviteInput, joinDaretHandler);
 export const approveDaret = makeCallable(daretIdInput, approveDaretHandler);
+export const approveMemberFor = makeCallable(approveMemberForInput, approveMemberForHandler);
 export const advancePeriod = makeCallable(daretIdInput, advancePeriodHandler);
 export const closePeriod = makeCallable(closePeriodInput, closePeriodHandler);
 export const closeDaret = makeCallable(daretIdInput, closeDaretHandler);
@@ -485,26 +490,80 @@ async function joinDaretHandler(
     const memberRef = daretRef.collection('members').doc(context.uid);
     const periodsSnapshot =
       placeholderUid === undefined ? undefined : await transaction.get(daretRef.collection('periods'));
+    const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
+    const currentPeriodRef = daretRef.collection('periods').doc(periodId(currentPeriode));
+    const currentContributions =
+      placeholderUid !== undefined && status === 'actif'
+        ? await transaction.get(currentPeriodRef.collection('contributions'))
+        : undefined;
+    if (placeholderUid !== undefined && status === 'actif') {
+      requireNotStarted(currentPeriode);
+      assertNoPaymentRecorded(currentContributions?.docs.map((doc) => doc.data()) ?? []);
+    }
     if (placeholderUid !== undefined && periodsSnapshot !== undefined) {
       const nextMemberUids = memberUids.map((uid) => (uid === placeholderUid ? context.uid : uid));
-      for (const periodSnapshot of periodsSnapshot.docs) {
-        const plan = readPeriodPlan(periodSnapshot);
-        if (!plan.recipientUids.includes(placeholderUid) && plan.shares[placeholderUid] === undefined) {
+      const plans = periodsSnapshot.docs.map(readPeriodPlan);
+      const nextPlans = plans.map((plan) => swapMemberInPlan(plan, placeholderUid, context.uid));
+      for (const plan of nextPlans) {
+        const previous = plans.find((item) => item.id === plan.id);
+        if (previous === undefined || !periodPlanChanged(previous, plan)) {
           continue;
         }
-        const recipientUids = plan.recipientUids.map((uid) => (uid === placeholderUid ? context.uid : uid));
-        const shares = {...plan.shares};
-        if (shares[placeholderUid] !== undefined) {
-          shares[context.uid] = shares[placeholderUid] ?? 0;
-          delete shares[placeholderUid];
+        transaction.update(daretRef.collection('periods').doc(plan.id), {
+          recipientUids: plan.recipientUids,
+          shares: plan.shares,
+        });
+      }
+      if (status === 'actif') {
+        const currentPlan = nextPlans.find((plan) => plan.index === currentPeriode);
+        if (currentPlan === undefined) {
+          fail('failed-precondition', 'Current period is missing.');
         }
-        transaction.update(periodSnapshot.ref, {recipientUids, shares});
+        const placeholderContribution = currentContributions?.docs.find(
+          (doc) => doc.id === placeholderUid,
+        );
+        if (placeholderContribution !== undefined) {
+          const contribution = requireExistingData(placeholderContribution, 'contribution');
+          transaction.delete(placeholderContribution.ref);
+          transaction.set(
+            currentPeriodRef.collection('contributions').doc(context.uid),
+            contributionDocument(
+              context.uid,
+              optionalString(contribution, 'state') === 'recipient' ? 'recipient' : 'apayer',
+              positiveInteger(contribution.amount, 'amount'),
+            ),
+            {merge: false},
+          );
+        } else if (!currentPlan.recipientUids.includes(context.uid)) {
+          transaction.set(
+            currentPeriodRef.collection('contributions').doc(context.uid),
+            contributionDocument(
+              context.uid,
+              'apayer',
+              contributionAmountForMember(
+                context.uid,
+                requirePositiveInteger(daret, 'montant'),
+                nextPlans,
+              ),
+            ),
+            {merge: false},
+          );
+          transaction.update(currentPeriodRef, {totalCount: FieldValue.increment(1)});
+        }
       }
       transaction.delete(daretRef.collection('members').doc(placeholderUid));
       transaction.update(daretRef, {
         memberUids: nextMemberUids,
+        ...(status === 'actif' ? {inviteCode: null} : {}),
         updatedAt: now,
       });
+      if (status === 'actif') {
+        transaction.set(
+          db.collection('invites').doc(context.data.code),
+          {active: false, filledByUid: context.uid, updatedAt: now},
+          {merge: true},
+        );
+      }
     } else {
       transaction.update(daretRef, {
         memberUids: FieldValue.arrayUnion(context.uid),
@@ -578,30 +637,117 @@ async function approveDaretHandler(
       return {activated: false};
     }
 
-    const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
-    if (currentPeriode !== 1) {
-      fail('failed-precondition', 'Pending darets must start at period 1.');
-    }
-    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
-    const periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
-    const currentPlan = periodPlans.find((plan) => plan.index === 1);
-    if (currentPlan === undefined) {
-      fail('failed-precondition', 'Period 1 is missing.');
-    }
+    await activateDaretFromApprovals(transaction, daretRef, {
+      daret,
+      daretId: context.data.daretId,
+      actorUid: context.uid,
+      now,
+    });
     transaction.update(memberRef, {approvalStatus: 'approved'});
-    setContributionsInTransaction(
-      transaction,
-      daretRef,
-      currentPlan,
-      requireStringArray(daret, 'memberUids'),
-      requirePositiveInteger(daret, 'montant'),
-      periodPlans,
-    );
-    transaction.update(daretRef, {statut: 'actif', startedAt: now, updatedAt: now});
-    transaction.update(daretRef.collection('periods').doc('01'), {status: 'current'});
     logger.info('approveDaret activated', {daretId: context.data.daretId, uid: context.uid});
     return {activated: true};
   });
+}
+
+async function approveMemberForHandler(
+  context: HandlerContext<ApproveMemberForInput>,
+  deps: HandlerDeps,
+): Promise<{activated: boolean}> {
+  const {db} = deps;
+  const now = deps.now();
+  const {daretId, memberUid} = context.data;
+  const daretRef = db.collection('darets').doc(daretId);
+
+  return db.runTransaction(async (transaction) => {
+    const daretSnapshot = await transaction.get(daretRef);
+    const daret = requireExistingData(daretSnapshot, 'daret');
+    requireAdmin(daret, context.uid);
+
+    const memberRef = daretRef.collection('members').doc(memberUid);
+    const memberSnapshot = await transaction.get(memberRef);
+    const member = requireExistingData(memberSnapshot, 'member');
+    if (optionalString(member, 'approvalStatus') === 'approved') {
+      return {activated: false};
+    }
+
+    const status = requireStatus(daret);
+    if (status !== 'attente') {
+      fail('failed-precondition', 'Only pending darets can approve members.');
+    }
+
+    const membersSnapshot = await transaction.get(daretRef.collection('members'));
+    const allApproved = membersSnapshot.docs.every((doc) => {
+      if (doc.id === memberUid) {
+        return true;
+      }
+      return optionalString(doc.data(), 'approvalStatus') === 'approved';
+    });
+
+    if (allApproved) {
+      await activateDaretFromApprovals(transaction, daretRef, {
+        daret,
+        daretId,
+        actorUid: context.uid,
+        now,
+      });
+    } else {
+      transaction.set(
+        daretRef.collection('activity').doc(`member-approved-${memberUid}`),
+        activityDocument({
+          type: 'membre',
+          actorUid: context.uid,
+          text: `${requireString(member, 'prenom')} a été approuvé dans ${requireString(daret, 'nom')}`,
+          createdAt: now,
+        }),
+        {merge: true},
+      );
+    }
+    transaction.update(memberRef, {approvalStatus: 'approved'});
+    logger.info('approveMemberFor completed', {daretId, uid: context.uid, memberUid, allApproved});
+    return {activated: allApproved};
+  });
+}
+
+async function activateDaretFromApprovals(
+  transaction: Transaction,
+  daretRef: DocumentReference,
+  input: {
+    daret: FirestoreData;
+    daretId: string;
+    actorUid: string;
+    now: Timestamp;
+  },
+): Promise<void> {
+  const currentPeriode = requirePositiveInteger(input.daret, 'currentPeriode');
+  if (currentPeriode !== 1) {
+    fail('failed-precondition', 'Pending darets must start at period 1.');
+  }
+  const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+  const periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
+  const currentPlan = periodPlans.find((plan) => plan.index === 1);
+  if (currentPlan === undefined) {
+    fail('failed-precondition', 'Period 1 is missing.');
+  }
+  setContributionsInTransaction(
+    transaction,
+    daretRef,
+    currentPlan,
+    requireStringArray(input.daret, 'memberUids'),
+    requirePositiveInteger(input.daret, 'montant'),
+    periodPlans,
+  );
+  transaction.update(daretRef, {statut: 'actif', startedAt: input.now, updatedAt: input.now});
+  transaction.update(daretRef.collection('periods').doc(periodId(1)), {status: 'current'});
+  transaction.set(
+    daretRef.collection('activity').doc('start'),
+    activityDocument({
+      type: 'demarre',
+      actorUid: input.actorUid,
+      text: `${requireString(input.daret, 'nom')} a démarré`,
+      createdAt: input.now,
+    }),
+    {merge: true},
+  );
 }
 
 async function advancePeriodHandler(
@@ -838,7 +984,7 @@ async function reorderPeriodsHandler(
     requireAdmin(daret, context.uid);
     const status = requireStatus(daret);
     if (status !== 'actif' && status !== 'attente') {
-      fail('failed-precondition', 'Only a daret that has not started can be reorganised.');
+      fail('failed-precondition', 'Only a pending or unpaid first-tour daret can be reorganised.');
     }
     const memberUids = requireStringArray(daret, 'memberUids');
     const periodesCount = requirePositiveInteger(daret, 'periodesCount');
@@ -856,8 +1002,8 @@ async function reorderPeriodsHandler(
 
     const updates = new Map<number, {recipientUids: string[]; shares: Record<string, number>}>();
     for (const assignment of context.data.periods) {
-      if (assignment.index <= currentPeriode) {
-        fail('failed-precondition', 'Only upcoming periods can be reorganised.');
+      if (assignment.index < currentPeriode) {
+        fail('failed-precondition', 'Only open periods can be reorganised.');
       }
       if (updates.has(assignment.index)) {
         fail('failed-precondition', 'Each period can be reassigned only once.');
@@ -876,8 +1022,10 @@ async function reorderPeriodsHandler(
       if (update === undefined) {
         return plan;
       }
-      if (plan.status !== 'upcoming') {
-        fail('failed-precondition', 'Only upcoming periods can be reorganised.');
+      const openCurrent =
+        plan.index === currentPeriode && (plan.status === 'current' || plan.status === 'upcoming');
+      if (!openCurrent && plan.status !== 'upcoming') {
+        fail('failed-precondition', 'Only open periods can be reorganised.');
       }
       return {...plan, recipientUids: update.recipientUids, shares: update.shares};
     });
@@ -894,8 +1042,22 @@ async function reorderPeriodsHandler(
       });
       updated += 1;
     }
+    if (status === 'actif') {
+      const currentPlan = composed.find((plan) => plan.index === currentPeriode);
+      if (currentPlan === undefined) {
+        fail('failed-precondition', 'Current period is missing.');
+      }
+      setContributionsInTransaction(
+        transaction,
+        daretRef,
+        currentPlan,
+        memberUids,
+        requirePositiveInteger(daret, 'montant'),
+        composed,
+      );
+    }
     if (updated === 0) {
-      fail('failed-precondition', 'No upcoming period was changed.');
+      fail('failed-precondition', 'No open period was changed.');
     }
     transaction.set(
       daretRef.collection('activity').doc(`reorder-${dateKey(now)}-${currentPeriode}`),
@@ -935,9 +1097,10 @@ async function replaceMemberHandler(
     requireAdmin(daret, context.uid);
     const status = requireStatus(daret);
     if (status !== 'actif' && status !== 'attente') {
-      fail('failed-precondition', 'Only a daret that has not started can replace a member.');
+      fail('failed-precondition', 'Only a pending or unpaid first-tour daret can replace a member.');
     }
     const memberUids = requireStringArray(daret, 'memberUids');
+    const periodesCount = requirePositiveInteger(daret, 'periodesCount');
     const currentPeriode = requirePositiveInteger(daret, 'currentPeriode');
     // Members may only be swapped before the daret has advanced and before any
     // payment is recorded — afterwards the membership is locked so nobody who
@@ -958,7 +1121,8 @@ async function replaceMemberHandler(
     for (const plan of plans) {
       const involvesFrom =
         plan.recipientUids.includes(fromUid) || plan.shares[fromUid] !== undefined;
-      if (involvesFrom && plan.status !== 'upcoming') {
+      const alreadyServed = plan.status === 'closed' || plan.index < currentPeriode;
+      if (involvesFrom && alreadyServed) {
         fail('failed-precondition', 'A member who already received a turn cannot be replaced.');
       }
     }
@@ -997,32 +1161,54 @@ async function replaceMemberHandler(
     const fromMember = requireExistingData(fromMemberSnapshot, 'member');
 
     const nextMemberUids = memberUids.map((uid) => (uid === fromUid ? newUid : uid));
+    const nextPlans = plans.map((plan) => swapMemberInPlan(plan, fromUid, newUid));
+    validatePeriodPlans(nextPlans, nextMemberUids, periodesCount);
+    const inviteCodeToRetire =
+      toUid !== undefined && isPendingMemberUid(fromUid)
+        ? optionalString(daret, 'inviteCode')
+        : undefined;
 
-    // Swap the replacement into every upcoming period assignment.
-    for (const plan of plans) {
-      if (!plan.recipientUids.includes(fromUid) && plan.shares[fromUid] === undefined) {
+    // Swap the replacement into every open period assignment.
+    for (const plan of nextPlans) {
+      const previous = plans.find((item) => item.id === plan.id);
+      if (previous === undefined || !periodPlanChanged(previous, plan)) {
         continue;
       }
-      const recipientUids = plan.recipientUids.map((uid) => (uid === fromUid ? newUid : uid));
-      const shares: Record<string, number> = {...plan.shares};
-      if (shares[fromUid] !== undefined) {
-        shares[newUid] = shares[fromUid] ?? 0;
-        delete shares[fromUid];
-      }
-      transaction.update(daretRef.collection('periods').doc(plan.id), {recipientUids, shares});
+      transaction.update(daretRef.collection('periods').doc(plan.id), {
+        recipientUids: plan.recipientUids,
+        shares: plan.shares,
+      });
     }
 
-    // Reassign the live tour's contribution. A real account takes it over; a
-    // vacant seat owes nothing until someone joins, so shrink the live total.
-    if (fromContribution !== undefined) {
+    // Reassign the live tour's contribution. Direct replacement gets a full
+    // current-tour recompute; a vacant seat owes nothing until someone joins.
+    if (toUid !== undefined && status === 'actif') {
+      const currentPlan = nextPlans.find((plan) => plan.index === currentPeriode);
+      if (currentPlan === undefined) {
+        fail('failed-precondition', 'Current period is missing.');
+      }
+      for (const doc of currentContributions.docs) {
+        if (!nextMemberUids.includes(doc.id)) {
+          transaction.delete(doc.ref);
+        }
+      }
+      setContributionsInTransaction(
+        transaction,
+        daretRef,
+        currentPlan,
+        nextMemberUids,
+        requirePositiveInteger(daret, 'montant'),
+        nextPlans,
+      );
+    } else if (fromContribution !== undefined) {
       transaction.delete(fromContributionRef);
-      if (toUid !== undefined) {
+      if (optionalString(fromContribution, 'state') === 'recipient') {
         transaction.set(
           currentPeriodRef.collection('contributions').doc(newUid),
-          contributionDocument(newUid, 'apayer', positiveInteger(fromContribution.amount, 'amount')),
+          contributionDocument(newUid, 'recipient', 0),
           {merge: false},
         );
-      } else if (optionalString(fromContribution, 'state') !== 'recipient') {
+      } else {
         transaction.update(currentPeriodRef, {totalCount: FieldValue.increment(-1)});
       }
     }
@@ -1037,6 +1223,7 @@ async function replaceMemberHandler(
       memberUids: nextMemberUids,
       updatedAt: now,
       ...(reservedCode !== undefined ? {inviteCode: reservedCode} : {}),
+      ...(inviteCodeToRetire !== undefined ? {inviteCode: null} : {}),
     });
     if (reservedCode !== undefined) {
       transaction.set(db.collection('invites').doc(reservedCode), {
@@ -1046,6 +1233,13 @@ async function replaceMemberHandler(
         expiresAt: Timestamp.fromMillis(now.toMillis() + INVITE_TTL_MS),
         createdAt: now,
       });
+    }
+    if (inviteCodeToRetire !== undefined) {
+      transaction.set(
+        db.collection('invites').doc(inviteCodeToRetire),
+        {active: false, filledByUid: newUid, updatedAt: now},
+        {merge: true},
+      );
     }
     transaction.set(
       daretRef.collection('activity').doc(`replace-${fromUid}-${newUid}`),
@@ -1619,6 +1813,28 @@ function readPeriodPlan(snapshot: DocumentSnapshot | QueryDocumentSnapshot): Per
     potAmount: requirePositiveInteger(data, 'potAmount'),
     status: requirePeriodStatus(data),
   };
+}
+
+function swapMemberInPlan(plan: PeriodPlan, fromUid: string, toUid: string): PeriodPlan {
+  if (!plan.recipientUids.includes(fromUid) && plan.shares[fromUid] === undefined) {
+    return plan;
+  }
+  const recipientUids = plan.recipientUids.map((uid) => (uid === fromUid ? toUid : uid));
+  const shares: Record<string, number> = {...plan.shares};
+  if (shares[fromUid] !== undefined) {
+    shares[toUid] = shares[fromUid] ?? 0;
+    delete shares[fromUid];
+  }
+  return {...plan, recipientUids, shares};
+}
+
+function periodPlanChanged(left: PeriodPlan, right: PeriodPlan): boolean {
+  if (left.recipientUids.join('|') !== right.recipientUids.join('|')) {
+    return true;
+  }
+  const leftShares = Object.entries(left.shares).sort(([a], [b]) => a.localeCompare(b));
+  const rightShares = Object.entries(right.shares).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(leftShares) !== JSON.stringify(rightShares);
 }
 
 function validatePeriodPlans(plans: PeriodPlan[], memberUids: string[], periodesCount: number): void {
@@ -2496,6 +2712,7 @@ export const __testables = {
   previewDaretHandler,
   joinDaretHandler,
   approveDaretHandler,
+  approveMemberForHandler,
   advancePeriodHandler,
   closePeriodHandler,
   closeDaretHandler,
@@ -2512,6 +2729,7 @@ export const __testables = {
   periodId,
   schemas: {
     daretIdInput,
+    approveMemberForInput,
     inviteInput,
     closePeriodInput,
     sendNudgeInput,

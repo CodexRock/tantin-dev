@@ -71,6 +71,16 @@ class DaretCallableRepository {
     return _callVoid('approveDaret', {'daretId': daretId});
   }
 
+  Future<void> approveMemberFor({
+    required String daretId,
+    required String memberUid,
+  }) {
+    return _callVoid(
+      'approveMemberFor',
+      {'daretId': daretId, 'memberUid': memberUid},
+    );
+  }
+
   Future<void> advancePeriod(String daretId) {
     return _callVoid('advancePeriod', {'daretId': daretId});
   }

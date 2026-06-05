@@ -15,6 +15,8 @@ import 'package:tantin_flutter/core/theme/tokens.dart';
 import 'package:tantin_flutter/design_system/design_system.dart';
 import 'package:tantin_flutter/features/activity/data/activity_providers.dart';
 import 'package:tantin_flutter/features/activity/domain/activity_event.dart';
+import 'package:tantin_flutter/features/create_daret/domain/create_daret_models.dart';
+import 'package:tantin_flutter/features/create_daret/presentation/widgets/create_participant_picker.dart';
 import 'package:tantin_flutter/features/darets/data/daret_callable_providers.dart';
 import 'package:tantin_flutter/features/darets/data/daret_providers.dart';
 import 'package:tantin_flutter/features/darets/domain/daret_logic.dart';
@@ -38,6 +40,7 @@ class DaretHubScreen extends ConsumerStatefulWidget {
 class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
   _HubTab _tab = _HubTab.courant;
   final Map<String, ContributionState> _optimisticStates = {};
+  final Set<String> _optimisticallyApprovedMembers = {};
   final Set<String> _busyKeys = {};
   String? _dismissedPayoutKey;
   bool _showClosureThanks = false;
@@ -75,6 +78,13 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final members =
         ref.watch(daretMembersProvider(daret.id)).valueOrNull ??
         const <DaretMember>[];
+    final displayMembers = members
+        .map(
+          (member) => _optimisticallyApprovedMembers.contains(member.uid)
+              ? member.copyWith(approvalStatus: ApprovalStatus.approved)
+              : member,
+        )
+        .toList(growable: false);
     final periods =
         ref.watch(periodsProvider(daret.id)).valueOrNull ??
         const <DaretPeriod>[];
@@ -94,9 +104,18 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     final currentPeriod = periods.firstWhereOrNull(
       (period) => period.index == daret.currentPeriode,
     );
-    final membersByUid = {for (final member in members) member.uid: member};
+    final membersByUid = {
+      for (final member in displayMembers) member.uid: member,
+    };
     final accent = hexToColor(daret.accent);
     final isAdmin = uid != null && uid == daret.adminUid;
+    final seatFillOptions = isAdmin
+        ? _seatFillOptions(
+            ref,
+            currentUid: uid,
+            existingMemberUids: daret.memberUids,
+          )
+        : const <CreateParticipant>[];
     // The order/members can only be rearranged before the daret advances past
     // its first tour AND before any payment is recorded — see requireNotStarted
     // / assertNoPaymentRecorded on the backend. This holds while the daret is
@@ -272,9 +291,22 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
                   _HubTab.membres => _MembersTab(
                     daret: daret,
                     periods: periods,
-                    members: members,
+                    members: displayMembers,
                     currentUid: uid,
+                    isAdmin: isAdmin,
+                    arrangeable: arrangeable,
                     accent: accent,
+                    busyKeys: _busyKeys,
+                    onApproveMember: (member) => unawaited(
+                      _handleApproveMember(daret: daret, member: member),
+                    ),
+                    onInvitationSeatTap: (member) => unawaited(
+                      _handleInvitationSeat(
+                        daret: daret,
+                        seat: member,
+                        options: seatFillOptions,
+                      ),
+                    ),
                   ),
                   _HubTab.activite => _ActivityTab(
                     events: activity,
@@ -467,30 +499,31 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     Map<String, DaretMember> membersByUid,
     Color accent,
   ) async {
-    final upcoming =
+    final reorderable =
         periods
             .where(
               (period) =>
-                  period.status == PeriodStatus.upcoming &&
-                  period.index > daret.currentPeriode,
+                  period.index >= daret.currentPeriode &&
+                  (period.status == PeriodStatus.upcoming ||
+                      period.status == PeriodStatus.current),
             )
             .toList()
           ..sort((left, right) => left.index.compareTo(right.index));
-    if (upcoming.length < 2) {
+    if (reorderable.length < 2) {
       _showSnack('Aucun tour à venir à réorganiser.');
       return;
     }
     final newOrder = await _showReorderSheet(
       context,
-      upcoming: upcoming,
+      periods: reorderable,
       membersByUid: membersByUid,
       accent: accent,
     );
     if (newOrder == null || !mounted) return;
 
     final payload = <Map<String, dynamic>>[];
-    for (var index = 0; index < upcoming.length; index++) {
-      final slot = upcoming[index];
+    for (var index = 0; index < reorderable.length; index++) {
+      final slot = reorderable[index];
       final assignment = newOrder[index];
       if (assignment.id == slot.id) continue;
       payload.add({
@@ -524,14 +557,16 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
       final servedAlready = periods.any(
         (period) =>
             period.recipientUids.contains(member.uid) &&
-            period.status != PeriodStatus.upcoming,
+            (period.status == PeriodStatus.closed ||
+                period.index < daret.currentPeriode),
       );
-      final hasUpcoming = periods.any(
+      final hasOpenTurn = periods.any(
         (period) =>
             period.recipientUids.contains(member.uid) &&
-            period.status == PeriodStatus.upcoming,
+            period.index >= daret.currentPeriode &&
+            period.status != PeriodStatus.closed,
       );
-      if (!servedAlready && hasUpcoming) replaceable.add(member);
+      if (!servedAlready && hasOpenTurn) replaceable.add(member);
     }
     if (replaceable.isEmpty) {
       _showSnack('Aucun membre remplaçable (tours déjà passés).');
@@ -567,6 +602,72 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     }
   }
 
+  Future<void> _handleApproveMember({
+    required Daret daret,
+    required DaretMember member,
+  }) async {
+    await _runHubAction(
+      busyKey: _memberApproveKey(daret.id, member.uid),
+      optimisticApprovedMemberUid: member.uid,
+      successMessage: '${member.prenom} approuvé',
+      failurePrefix: 'Approbation impossible',
+      action: () => ref
+          .read(daretCallableRepositoryProvider)
+          .approveMemberFor(daretId: daret.id, memberUid: member.uid),
+    );
+  }
+
+  Future<void> _handleInvitationSeat({
+    required Daret daret,
+    required DaretMember seat,
+    required List<CreateParticipant> options,
+  }) async {
+    final action = await _showInvitationSeatSheet(
+      context,
+      daret: daret,
+      seat: seat,
+    );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case _InvitationSeatAction.choose:
+        final pick = await _showSeatParticipantPickerSheet(
+          context,
+          options: options,
+        );
+        if (pick == null || !mounted) return;
+        if (pick.participant case final participant?) {
+          await _runHubAction(
+            busyKey: _adminKey('fill-seat', daret.id),
+            successMessage: '${participant.prenom} rejoint la place libérée',
+            failurePrefix: 'Remplissage impossible',
+            action: () async {
+              await ref
+                  .read(daretCallableRepositoryProvider)
+                  .replaceMember(
+                    daretId: daret.id,
+                    fromUid: seat.uid,
+                    toUid: participant.uid,
+                  );
+            },
+          );
+          return;
+        }
+        if (daret.inviteCode case final code?) {
+          _showSnack('Code prêt pour ${pick.contactName ?? 'ce contact'}');
+          await _showReplaceShareSheet(context, daret: daret, code: code);
+        } else {
+          _showSnack("Code d'invitation indisponible.");
+        }
+      case _InvitationSeatAction.share:
+        if (daret.inviteCode case final code?) {
+          await _showReplaceShareSheet(context, daret: daret, code: code);
+        } else {
+          _showSnack("Code d'invitation indisponible.");
+        }
+    }
+  }
+
   Future<void> _handleDeleteDaret(Daret daret) async {
     final confirmed = await _showDeleteDaretSheet(context, daret: daret);
     if (confirmed != true || !mounted) return;
@@ -589,6 +690,7 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
     required Future<void> Function() action,
     String? optimisticKey,
     ContributionState? optimisticState,
+    String? optimisticApprovedMemberUid,
   }) async {
     if (_busyKeys.contains(busyKey)) return false;
 
@@ -596,6 +698,9 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
       _busyKeys.add(busyKey);
       if (optimisticKey != null && optimisticState != null) {
         _optimisticStates[optimisticKey] = optimisticState;
+      }
+      if (optimisticApprovedMemberUid != null) {
+        _optimisticallyApprovedMembers.add(optimisticApprovedMemberUid);
       }
     });
 
@@ -606,6 +711,9 @@ class _DaretHubScreenState extends ConsumerState<DaretHubScreen> {
       setState(() {
         _busyKeys.remove(busyKey);
         if (optimisticKey != null) _optimisticStates.remove(optimisticKey);
+        if (optimisticApprovedMemberUid != null) {
+          _optimisticallyApprovedMembers.remove(optimisticApprovedMemberUid);
+        }
       });
       _showSnack('$failurePrefix : $error');
       return false;
@@ -701,6 +809,8 @@ Future<bool?> _showCloseDaretSheet(
 
 enum _AdminAction { editDetails, reorder, replaceMember, delete }
 
+enum _InvitationSeatAction { choose, share }
+
 class _EditDetailsResult {
   const _EditDetailsResult({
     required this.nom,
@@ -711,6 +821,21 @@ class _EditDetailsResult {
   final String nom;
   final String cover;
   final String accent;
+}
+
+class _SeatPickResult {
+  const _SeatPickResult._({this.participant, this.contactName});
+
+  factory _SeatPickResult.participant(CreateParticipant participant) {
+    return _SeatPickResult._(participant: participant);
+  }
+
+  factory _SeatPickResult.contact(String name) {
+    return _SeatPickResult._(contactName: name);
+  }
+
+  final CreateParticipant? participant;
+  final String? contactName;
 }
 
 const List<String> _accentPresets = [
@@ -749,7 +874,7 @@ Future<_EditDetailsResult?> _showEditDetailsSheet(
 
 Future<List<DaretPeriod>?> _showReorderSheet(
   BuildContext context, {
-  required List<DaretPeriod> upcoming,
+  required List<DaretPeriod> periods,
   required Map<String, DaretMember> membersByUid,
   required Color accent,
 }) {
@@ -758,7 +883,7 @@ Future<List<DaretPeriod>?> _showReorderSheet(
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
     builder: (_) => _ReorderSheet(
-      upcoming: upcoming,
+      periods: periods,
       membersByUid: membersByUid,
       accent: accent,
     ),
@@ -799,6 +924,31 @@ Future<void> _showReplaceShareSheet(
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
     builder: (_) => _ReplaceShareSheet(daret: daret, code: code),
+  );
+}
+
+Future<_InvitationSeatAction?> _showInvitationSeatSheet(
+  BuildContext context, {
+  required Daret daret,
+  required DaretMember seat,
+}) {
+  return showModalBottomSheet<_InvitationSeatAction>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _InvitationSeatSheet(daret: daret, seat: seat),
+  );
+}
+
+Future<_SeatPickResult?> _showSeatParticipantPickerSheet(
+  BuildContext context, {
+  required List<CreateParticipant> options,
+}) {
+  return showModalBottomSheet<_SeatPickResult>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (_) => _SeatParticipantPickerSheet(options: options),
   );
 }
 
@@ -1171,12 +1321,12 @@ class _AccentSwatch extends StatelessWidget {
 
 class _ReorderSheet extends StatefulWidget {
   const _ReorderSheet({
-    required this.upcoming,
+    required this.periods,
     required this.membersByUid,
     required this.accent,
   });
 
-  final List<DaretPeriod> upcoming;
+  final List<DaretPeriod> periods;
   final Map<String, DaretMember> membersByUid;
   final Color accent;
 
@@ -1190,7 +1340,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
   @override
   void initState() {
     super.initState();
-    _order = List<DaretPeriod>.of(widget.upcoming);
+    _order = List<DaretPeriod>.of(widget.periods);
   }
 
   @override
@@ -1211,7 +1361,7 @@ class _ReorderSheetState extends State<_ReorderSheet> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Glissez pour changer qui reçoit chaque tour à venir.',
+            'Glissez pour changer qui reçoit chaque tour avant paiement.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: TantinColors.inkMuted,
@@ -1465,6 +1615,127 @@ class _ReplaceConfirmSheet extends StatelessWidget {
   }
 }
 
+class _InvitationSeatSheet extends StatelessWidget {
+  const _InvitationSeatSheet({required this.daret, required this.seat});
+
+  final Daret daret;
+  final DaretMember seat;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SheetHeroIcon(
+            background: TantinColors.saffron.withValues(alpha: 0.18),
+            child: TnIcons.contacts(size: 30, color: TantinColors.saffronDeep),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Place libre',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.displayLarge?.copyWith(
+              color: TantinColors.ink,
+              fontSize: 22,
+              letterSpacing: -0.44,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${seat.prenom} peut être remplie maintenant ou partagée avec '
+            'le code déjà créé pour ${daret.nom}.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: TantinColors.inkMuted,
+              fontSize: 14.5,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TnButton(
+            full: true,
+            icon: TnIcons.contacts(size: 18),
+            onPressed: () =>
+                Navigator.of(context).pop(_InvitationSeatAction.choose),
+            child: const Text('Choisir dans mes contacts'),
+          ),
+          const SizedBox(height: 10),
+          TnButton(
+            full: true,
+            variant: ButtonVariant.ghost,
+            icon: TnIcons.share(size: 18),
+            disabled: daret.inviteCode == null,
+            onPressed: daret.inviteCode == null
+                ? null
+                : () => Navigator.of(context).pop(_InvitationSeatAction.share),
+            child: const Text('Partager le code'),
+          ),
+          const SizedBox(height: 10),
+          _CancelSheetButton(onPressed: () => Navigator.of(context).pop()),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeatParticipantPickerSheet extends StatelessWidget {
+  const _SeatParticipantPickerSheet({required this.options});
+
+  final List<CreateParticipant> options;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ActionSheetShell(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.62,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Choisir une personne',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.displayLarge?.copyWith(
+                color: TantinColors.ink,
+                fontSize: 22,
+                letterSpacing: -0.44,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Un membre inscrit remplit la place directement. Un contact '
+              'garde le code à partager.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: TantinColors.inkMuted,
+                fontSize: 13.5,
+                height: 1.4,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: CreateParticipantPicker(
+                options: options,
+                selectedUids: const <String>{},
+                showSelection: false,
+                contactEmptyTitle: 'Contacts',
+                onParticipantTap: (participant) => Navigator.of(context).pop(
+                  _SeatPickResult.participant(participant),
+                ),
+                onContactTap: (name) => Navigator.of(context).pop(
+                  _SeatPickResult.contact(name),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ReplaceShareSheet extends StatelessWidget {
   const _ReplaceShareSheet({required this.daret, required this.code});
 
@@ -1563,6 +1834,8 @@ class _DeleteDaretSheet extends StatefulWidget {
 }
 
 class _DeleteDaretSheetState extends State<_DeleteDaretSheet> {
+  static const _confirmationKeyword = 'SUPPRIMER';
+
   final TextEditingController _controller = TextEditingController();
 
   @override
@@ -1604,10 +1877,13 @@ class _DeleteDaretSheetState extends State<_DeleteDaretSheet> {
             ),
           ),
           const SizedBox(height: 14),
-          _FieldLabel('Tapez « ${widget.daret.nom} » pour confirmer'),
+          const _FieldLabel('Tapez « SUPPRIMER » pour confirmer'),
           TextField(
             controller: _controller,
-            decoration: _fieldDecoration(widget.daret.nom),
+            autocorrect: false,
+            enableSuggestions: false,
+            textCapitalization: TextCapitalization.characters,
+            decoration: _fieldDecoration(_confirmationKeyword),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
@@ -1626,8 +1902,7 @@ class _DeleteDaretSheetState extends State<_DeleteDaretSheet> {
   }
 
   bool get _matches =>
-      _controller.text.trim() == widget.daret.nom.trim() &&
-      widget.daret.nom.trim().isNotEmpty;
+      _controller.text.trim().toUpperCase() == _confirmationKeyword;
 }
 
 class _ConfirmPaySheet extends StatelessWidget {
@@ -2534,30 +2809,35 @@ class _ActionSheetShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.paddingOf(context).bottom;
+    final bottom =
+        MediaQuery.paddingOf(context).bottom +
+        MediaQuery.viewInsetsOf(context).bottom;
     return Container(
       padding: EdgeInsets.fromLTRB(20, 10, 20, 20 + bottom),
       decoration: const BoxDecoration(
         color: TantinColors.ivorySurface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 5,
-              margin: const EdgeInsets.only(top: 4, bottom: 14),
-              decoration: BoxDecoration(
-                color: TantinColors.ivorySunken,
-                borderRadius: BorderRadius.circular(5),
+      child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                margin: const EdgeInsets.only(top: 4, bottom: 14),
+                decoration: BoxDecoration(
+                  color: TantinColors.ivorySunken,
+                  borderRadius: BorderRadius.circular(5),
+                ),
               ),
             ),
-          ),
-          child,
-        ],
+            child,
+          ],
+        ),
       ),
     );
   }
@@ -3881,14 +4161,24 @@ class _MembersTab extends StatelessWidget {
     required this.periods,
     required this.members,
     required this.currentUid,
+    required this.isAdmin,
+    required this.arrangeable,
     required this.accent,
+    required this.busyKeys,
+    required this.onApproveMember,
+    required this.onInvitationSeatTap,
   });
 
   final Daret daret;
   final List<DaretPeriod> periods;
   final List<DaretMember> members;
   final String? currentUid;
+  final bool isAdmin;
+  final bool arrangeable;
   final Color accent;
+  final Set<String> busyKeys;
+  final ValueChanged<DaretMember> onApproveMember;
+  final ValueChanged<DaretMember> onInvitationSeatTap;
 
   @override
   Widget build(BuildContext context) {
@@ -3910,20 +4200,41 @@ class _MembersTab extends StatelessWidget {
     return Column(
       children: [
         for (var index = 0; index < ordered.length; index++) ...[
-          _MemberRow(
-            member: ordered[index],
-            turnIndex: periods
-                .firstWhereOrNull(
-                  (period) => period.recipientUids.contains(ordered[index].uid),
-                )
-                ?.index,
-            isCurrentRecipient: periods.any(
-              (period) =>
-                  period.index == daret.currentPeriode &&
-                  period.recipientUids.contains(ordered[index].uid),
-            ),
-            isMe: ordered[index].uid == currentUid,
-            accent: accent,
+          Builder(
+            builder: (_) {
+              final member = ordered[index];
+              final isInvitation = _isInvitationMember(member);
+              final canApprove =
+                  isAdmin &&
+                  !isInvitation &&
+                  member.uid != daret.adminUid &&
+                  member.approvalStatus == ApprovalStatus.pending;
+              final canFillInvitation = isAdmin && arrangeable && isInvitation;
+              return _MemberRow(
+                member: member,
+                turnIndex: periods
+                    .firstWhereOrNull(
+                      (period) => period.recipientUids.contains(member.uid),
+                    )
+                    ?.index,
+                isCurrentRecipient: periods.any(
+                  (period) =>
+                      period.index == daret.currentPeriode &&
+                      period.recipientUids.contains(member.uid),
+                ),
+                isMe: member.uid == currentUid,
+                accent: accent,
+                approveVisible: canApprove,
+                approveBusy: busyKeys.contains(
+                  _memberApproveKey(daret.id, member.uid),
+                ),
+                onApprove: canApprove ? () => onApproveMember(member) : null,
+                invitationActionVisible: canFillInvitation,
+                onTap: canFillInvitation
+                    ? () => onInvitationSeatTap(member)
+                    : null,
+              );
+            },
           ),
           if (index != ordered.length - 1) const SizedBox(height: 7),
         ],
@@ -3939,6 +4250,11 @@ class _MemberRow extends StatelessWidget {
     required this.isCurrentRecipient,
     required this.isMe,
     required this.accent,
+    required this.approveVisible,
+    required this.approveBusy,
+    required this.invitationActionVisible,
+    this.onApprove,
+    this.onTap,
   });
 
   final DaretMember member;
@@ -3946,6 +4262,11 @@ class _MemberRow extends StatelessWidget {
   final bool isCurrentRecipient;
   final bool isMe;
   final Color accent;
+  final bool approveVisible;
+  final bool approveBusy;
+  final bool invitationActionVisible;
+  final VoidCallback? onApprove;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -3958,7 +4279,7 @@ class _MemberRow extends StatelessWidget {
       if (!approved) 'En attente',
     ].join(' · ');
 
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
       decoration: BoxDecoration(
         color: TantinColors.ivorySurface,
@@ -3998,7 +4319,21 @@ class _MemberRow extends StatelessWidget {
               ],
             ),
           ),
-          if (isAdmin)
+          if (approveVisible)
+            TnButton(
+              size: ButtonSize.sm,
+              variant: ButtonVariant.soft,
+              disabled: approveBusy,
+              onPressed: approveBusy ? null : onApprove,
+              child: const Text('Approuver'),
+            )
+          else if (invitationActionVisible)
+            const _Pill(
+              label: 'Choisir',
+              color: TantinColors.majorelle,
+              background: TantinColors.majorelleSoft,
+            )
+          else if (isAdmin)
             const _Pill(
               label: 'Admin',
               color: TantinColors.majorelle,
@@ -4021,6 +4356,8 @@ class _MemberRow extends StatelessWidget {
         ],
       ),
     );
+    if (onTap == null) return content;
+    return Pressable(onPressed: onTap, child: content);
   }
 }
 
@@ -4210,6 +4547,45 @@ String _closeDaretKey(String daretId) {
 
 String _adminKey(String op, String daretId) {
   return '$op:$daretId';
+}
+
+String _memberApproveKey(String daretId, String memberUid) {
+  return 'approve-member:$daretId:$memberUid';
+}
+
+bool _isInvitationMember(DaretMember member) {
+  return member.uid.startsWith('pending_');
+}
+
+List<CreateParticipant> _seatFillOptions(
+  WidgetRef ref, {
+  required String? currentUid,
+  required List<String> existingMemberUids,
+}) {
+  final excluded = <String>{
+    ...existingMemberUids,
+    ?currentUid,
+  };
+  final darets = ref.watch(myDaretsProvider).valueOrNull ?? const <Daret>[];
+  final options = <String, CreateParticipant>{};
+  for (final daret in darets) {
+    final members =
+        ref.watch(daretMembersProvider(daret.id)).valueOrNull ??
+        const <DaretMember>[];
+    for (final member in members) {
+      if (excluded.contains(member.uid) || _isInvitationMember(member)) {
+        continue;
+      }
+      options.putIfAbsent(
+        member.uid,
+        () => createParticipantFromMember(member),
+      );
+    }
+  }
+  if (options.isNotEmpty) return options.values.toList(growable: false);
+  return fallbackCreateParticipantOptions
+      .where((option) => !excluded.contains(option.uid))
+      .toList(growable: false);
 }
 
 String _periodMoment(Daret daret) {
