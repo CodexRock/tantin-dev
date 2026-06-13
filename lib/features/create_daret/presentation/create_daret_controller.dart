@@ -85,7 +85,7 @@ class CreateDaretController extends StateNotifier<CreateDaretState> {
         ? 'Invitation $index'
         : displayName.trim();
     final participant = CreateParticipant(
-      uid: 'pending_invite_$index',
+      uid: 'pending_invite_${DateTime.now().millisecondsSinceEpoch}_$index',
       name: label,
       prenom: label.split(' ').first,
       initials: 'IN',
@@ -199,16 +199,16 @@ class CreateDaretController extends StateNotifier<CreateDaretState> {
         inviteCode: inviteCode,
       );
       state = state.copyWith(
-        isSubmitting: false,
         result: result,
       );
       return result;
     } on Object catch (error) {
       state = state.copyWith(
-        isSubmitting: false,
         submitError: error.toString(),
       );
       rethrow;
+    } finally {
+      state = state.copyWith(isSubmitting: false);
     }
   }
 }

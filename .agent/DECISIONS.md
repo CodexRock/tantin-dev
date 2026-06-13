@@ -376,3 +376,40 @@
 - **Guard:** Functions tests cover first-tour reorder plus live contribution reseeding and replacing the
   current unpaid recipient. Widget test `reorder sheet includes the first unpaid tour` prevents the UI
   from hiding tour 1 again.
+
+## D035: S6 FCM push, notification UX, Profil settings, and release-flippable App Check
+- **Decision (push, client):** `PushMessaging` (`lib/features/notifications/data/push_messaging.dart`)
+  requests notification permission and persists the FCM token to `users/{uid}.fcmTokens` via
+  `arrayUnion` (rules already allow the owner to write `fcmTokens`+`updatedAt`). `main.dart`'s `MyApp`
+  is now a `ConsumerStatefulWidget`: it registers the token once the user is authenticated AND has a
+  profile, re-persists on `onTokenRefresh`, routes `getInitialMessage`/`onMessageOpenedApp` taps to
+  `/daret/{daretId}`, and registers a top-level `@pragma('vm:entry-point')` background handler. The
+  entire messaging bootstrap is wrapped so a test environment (no Firebase app) skips it instead of
+  crashing the boot — the `widget_test` boot test stays green and logs `Push messaging setup skipped`.
+  Sign-out best-effort removes the device token. Added `POST_NOTIFICATIONS` to the Android manifest.
+- **Decision (push, backend):** `HandlerDeps` gains an OPTIONAL `sendPush?` so handler unit tests
+  (which build `deps()` without it) never hit FCM and behavior is unchanged by construction.
+  `defaultDeps` wires `deliverPush` (reads `fcmTokens`, `sendEachForMulticast`, prunes
+  not-registered/invalid tokens, never throws). Pushes are sent as post-commit side effects at the
+  three existing in-app-notification points: `sendNudge` (→ target), `dailyReminders` (→ payer),
+  `joinDaret` (→ admin). No new notification *types* were added (e.g. a dedicated "C'est votre tour"
+  push) — that is a clean future follow-up.
+- **Decision (Profil rows):** the four previously-inert settings rows are now real. "Notifications" and
+  "Réglages des darets" open sheets that read/write `users/{uid}.settings` through the existing
+  `UserRepository.updateSettings` (notif prefs switches; échéance-day + grace-day steppers). "Langue"
+  and "Aide & support" open informational sheets. Notification rows are now tappable (mark-read via the
+  existing `setUnread` + route to the daret), and "Tout lire" (new `markAllRead` batch) clears the
+  Accueil bell badge.
+- **Decision (App Check):** `enforceAppCheck` is now `process.env.ENFORCE_APP_CHECK === 'true'`
+  (default false → dev unchanged, no regression; the client already uses Play Integrity in release).
+  Release deploys flip it on by setting that env var — no code change. This makes D022 release-ready
+  without breaking the dev device.
+- **Rationale:** push delivery is the core "the reminder actually reaches you" value that was missing;
+  the optional-`sendPush` design keeps the privileged-write/state-machine logic and all existing tests
+  untouched; reusing the already-present settings model + repo + rules means the Profil features are
+  genuine, not stubs.
+- **Guard:** `dart run tool/verify.dart` → GATE: PASS (analyze "No issues found!", flutter test +74);
+  `functions` `tsc` compiles clean. STILL PENDING (infra, outside the repo): deploy Functions, grant
+  D027 invoker bindings, enable Cloud Messaging + confirm `google-services.json`, and the on-device
+  push/tap walkthrough. Run `npm run test:functions` + `npm run test:rules` (emulator) to confirm the
+  backend suite — unchanged by construction but not run in this environment.

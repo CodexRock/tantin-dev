@@ -788,6 +788,40 @@ describe('admin management (Part 4)', () => {
     expect(invite.data()).toMatchObject({active: false, filledByUid: 'newcomer'});
   });
 
+  test('replaceMember fills the last pending slot on an attente daret and activates it', async () => {
+    await seedUser('admin', 'Admin');
+    await seedUser('payer', 'Payer');
+    await seedUser('newcomer', 'Newcomer');
+    await seedDraftDaret('d1', ['admin', 'payer', 'pending_7k2p'], 'admin', 3, 'attente', 'approved');
+    await db.collection('darets').doc('d1').collection('members').doc('pending_7k2p').update({approvalStatus: 'pending', uid: 'pending_7k2p', prenom: 'Invitation'});
+    await db.collection('darets').doc('d1').update({currentPeriode: 1});
+    await seedPeriodDoc('d1', 1, 'admin', 'upcoming');
+    await seedPeriodDoc('d1', 2, 'payer', 'upcoming');
+    await seedPeriodDoc('d1', 3, 'pending_7k2p', 'upcoming');
+
+    const result = await __testables.replaceMemberHandler(
+      ctx('admin', {daretId: 'd1', fromUid: 'pending_7k2p', toUid: 'newcomer'}),
+      deps(),
+    );
+
+    expect(result).toEqual({replaced: true});
+    const daret = await db.collection('darets').doc('d1').get();
+    expect(daret.data()?.statut).toBe('actif');
+    expect(daret.data()?.startedAt).toBeTruthy();
+    const liveTour = await db.collection('darets').doc('d1').collection('periods').doc('01').get();
+    expect(liveTour.data()?.status).toBe('current');
+    // A 3-member daret seeds one contribution per member (the period-1 recipient
+    // gets a 'recipient' doc, the other two owe), so totalCount is 2.
+    const contributions = await liveTour.ref.collection('contributions').get();
+    expect(contributions.size).toBe(3);
+    expect(liveTour.data()?.totalCount).toBe(2);
+    const newcomerContribution = await liveTour.ref
+      .collection('contributions')
+      .doc('newcomer')
+      .get();
+    expect(newcomerContribution.data()).toMatchObject({state: 'apayer'});
+  });
+
   test('placeholder fill rejects locked arrangements and non-admin callers', async () => {
     await seedReplaceDaret('d1');
     await __testables.replaceMemberHandler(ctx('admin', {daretId: 'd1', fromUid: 'recipient'}), deps());

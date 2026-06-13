@@ -149,7 +149,9 @@ List<CreateParticipant> _memberOptions(WidgetRef ref, String currentUid) {
         ref.watch(daretMembersProvider(daret.id)).valueOrNull ??
         const <DaretMember>[];
     for (final member in members) {
-      if (member.uid == currentUid) continue;
+      if (member.uid == currentUid || member.uid.startsWith('pending_')) {
+        continue;
+      }
       options.putIfAbsent(
         member.uid,
         () => createParticipantFromMember(member),

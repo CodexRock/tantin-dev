@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tantin_flutter/core/firebase/firebase_providers.dart';
 import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
 import 'package:tantin_flutter/features/notifications/data/notification_repository.dart';
+import 'package:tantin_flutter/features/notifications/data/push_messaging.dart';
 import 'package:tantin_flutter/features/notifications/domain/app_notification.dart';
 
 // Manual Riverpod 2 providers (no codegen; see DECISIONS D025).
@@ -9,6 +10,13 @@ import 'package:tantin_flutter/features/notifications/domain/app_notification.da
 final AutoDisposeProvider<NotificationRepository>
 notificationRepositoryProvider = Provider.autoDispose<NotificationRepository>(
   (ref) => NotificationRepository(ref.watch(firebaseFirestoreProvider)),
+);
+
+final Provider<PushMessaging> pushMessagingProvider = Provider<PushMessaging>(
+  (ref) => PushMessaging(
+    ref.watch(firebaseMessagingProvider),
+    ref.watch(firebaseFirestoreProvider),
+  ),
 );
 
 final AutoDisposeStreamProvider<List<AppNotification>> notificationsProvider =

@@ -2,10 +2,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:tantin_flutter/core/format/format.dart';
+import 'package:tantin_flutter/core/motion/motion.dart';
 import 'package:tantin_flutter/core/theme/color_utils.dart';
 import 'package:tantin_flutter/core/theme/tokens.dart';
 import 'package:tantin_flutter/design_system/design_system.dart';
+import 'package:tantin_flutter/features/auth/data/auth_providers.dart';
+import 'package:tantin_flutter/features/notifications/data/notification_providers.dart';
 import 'package:tantin_flutter/features/profile/data/user_providers.dart';
+import 'package:tantin_flutter/features/profile/presentation/widgets/profil_sheets.dart';
 
 /// Profil — identity header, lifetime stats, settings list, and logout.
 class ProfilScreen extends ConsumerWidget {
@@ -95,16 +99,32 @@ class ProfilScreen extends ConsumerWidget {
                 ],
               ),
             ),
-            const _SettingsTile(icon: 'settings', label: 'Réglages des darets'),
-            const _SettingsTile(icon: 'globe', label: 'Langue · Français'),
-            const _SettingsTile(icon: 'bell', label: 'Notifications'),
-            const _SettingsTile(icon: 'help', label: 'Aide & support'),
+            _SettingsTile(
+              icon: 'settings',
+              label: 'Réglages des darets',
+              onTap: () => showDaretDefaultsSheet(context),
+            ),
+            _SettingsTile(
+              icon: 'globe',
+              label: 'Langue · Français',
+              onTap: () => showLanguageSheet(context),
+            ),
+            _SettingsTile(
+              icon: 'bell',
+              label: 'Notifications',
+              onTap: () => showNotifPrefsSheet(context),
+            ),
+            _SettingsTile(
+              icon: 'help',
+              label: 'Aide & support',
+              onTap: () => showHelpSheet(context),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: TnButton(
                 variant: ButtonVariant.danger,
                 full: true,
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: () => _logout(ref),
                 child: const Text('Se déconnecter'),
               ),
             ),
@@ -113,6 +133,18 @@ class ProfilScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+Future<void> _logout(WidgetRef ref) async {
+  final uid = ref.read(authStateChangesProvider).valueOrNull?.uid;
+  if (uid != null) {
+    try {
+      await ref.read(pushMessagingProvider).unregisterForUser(uid);
+    } on Object {
+      // Best effort — never block sign-out on token cleanup.
+    }
+  }
+  await FirebaseAuth.instance.signOut();
 }
 
 class _StatTile extends StatelessWidget {
@@ -160,38 +192,46 @@ class _StatTile extends StatelessWidget {
 }
 
 class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({required this.icon, required this.label});
+  const _SettingsTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final String icon;
   final String label;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: TantinColors.ivorySurface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: TantinColors.hairline),
-        ),
-        child: Row(
-          children: [
-            _icon(),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 14.5,
-                  color: TantinColors.ink,
-                  fontWeight: FontWeight.w600,
+      child: Pressable(
+        onPressed: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: TantinColors.ivorySurface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: TantinColors.hairline),
+          ),
+          child: Row(
+            children: [
+              _icon(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    color: TantinColors.ink,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-            ),
-            TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
-          ],
+              TnIcons.chevR(size: 18, color: TantinColors.inkMuted),
+            ],
+          ),
         ),
       ),
     );

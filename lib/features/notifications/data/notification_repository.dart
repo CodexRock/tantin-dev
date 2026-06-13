@@ -33,4 +33,24 @@ class NotificationRepository {
         .doc(notificationId)
         .update({'unread': unread});
   }
+
+  /// Marks every currently-unread notification as read in a single batch so the
+  /// Accueil bell badge clears. Only the `unread` field is touched, which the
+  /// security rules allow the owner to write.
+  Future<void> markAllRead({
+    required String uid,
+    required Iterable<String> unreadIds,
+  }) async {
+    final ids = unreadIds.toList(growable: false);
+    if (ids.isEmpty) return;
+    final batch = _firestore.batch();
+    final items = _firestore
+        .collection('notifications')
+        .doc(uid)
+        .collection('items');
+    for (final id in ids) {
+      batch.update(items.doc(id), {'unread': false});
+    }
+    await batch.commit();
+  }
 }

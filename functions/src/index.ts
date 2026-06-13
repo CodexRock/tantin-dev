@@ -10,6 +10,7 @@ import {
   WriteBatch,
   getFirestore,
 } from 'firebase-admin/firestore';
+import {Messaging, getMessaging} from 'firebase-admin/messaging';
 import {logger} from 'firebase-functions';
 import {onDocumentCreated, onDocumentWritten} from 'firebase-functions/v2/firestore';
 import {HttpsError, onCall} from 'firebase-functions/v2/https';
@@ -29,8 +30,11 @@ const INVITE_CODE_PATTERN = /^TANTIN-[A-Z0-9]{4,8}$/;
 const PENDING_MEMBER_PREFIX = 'pending_';
 // App Check enforcement is OFF in dev: the test devices' Play Integrity is
 // unreliable ("Too many attempts") and blocks every callable. Auth + Firestore
-// rules still protect all data. RE-ENABLE before release (S6). See DECISIONS.
-const enforceAppCheck: boolean = false;
+// rules still protect all data. Release deploys turn it on by setting the
+// ENFORCE_APP_CHECK env var to "true" (the client already uses Play Integrity in
+// release builds) — no code change needed to flip it. Dev stays OFF by default
+// so the test device is not blocked. See DECISIONS D022.
+const enforceAppCheck: boolean = process.env.ENFORCE_APP_CHECK === 'true';
 const callableOptions = {region: REGION, enforceAppCheck};
 
 type ErrorCode =
@@ -64,11 +68,23 @@ interface HandlerContext<T> {
   data: T;
 }
 
+interface PushIntent {
+  uid: string;
+  title: string;
+  body: string;
+  action?: string;
+  daretId?: string;
+}
+
 interface HandlerDeps {
   db: Firestore;
   now: () => Timestamp;
   randomCode: () => string;
   projectId: string;
+  // Optional so handler unit tests (which build deps without it) stay pure and
+  // never hit FCM. Production wires it in defaultDeps; handlers call it as a
+  // post-commit, best-effort side effect via `deps.sendPush?.(...)`.
+  sendPush?: (intents: PushIntent[]) => Promise<void>;
 }
 
 interface PersonProfile {
@@ -171,7 +187,64 @@ function defaultDeps(): HandlerDeps {
     now: () => Timestamp.now(),
     randomCode: randomInviteCode,
     projectId: process.env.GCLOUD_PROJECT ?? process.env.GCP_PROJECT ?? '',
+    sendPush: (intents) => deliverPush(getFirestore(), getMessaging(), intents),
   };
+}
+
+// Best-effort FCM delivery. Reads each target's `fcmTokens`, sends a multicast
+// notification + data payload, and prunes tokens the FCM backend reports as
+// permanently invalid. Never throws: push is a side effect and must not fail
+// the originating write.
+async function deliverPush(
+  db: Firestore,
+  messaging: Messaging,
+  intents: PushIntent[],
+): Promise<void> {
+  for (const intent of intents) {
+    try {
+      const userSnapshot = await db.collection('users').doc(intent.uid).get();
+      const rawTokens = userSnapshot.get('fcmTokens');
+      const tokens = Array.isArray(rawTokens)
+        ? rawTokens.filter((token): token is string => typeof token === 'string' && token.length > 0)
+        : [];
+      if (tokens.length === 0) {
+        continue;
+      }
+      const data: Record<string, string> = {};
+      if (intent.action !== undefined) {
+        data.action = intent.action;
+      }
+      if (intent.daretId !== undefined) {
+        data.daretId = intent.daretId;
+      }
+      const response = await messaging.sendEachForMulticast({
+        tokens,
+        notification: {title: intent.title, body: intent.body},
+        data,
+        android: {priority: 'high'},
+      });
+      const invalidTokens: string[] = [];
+      response.responses.forEach((result, index) => {
+        const code = result.error?.code;
+        const token = tokens[index];
+        if (
+          token !== undefined &&
+          (code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token')
+        ) {
+          invalidTokens.push(token);
+        }
+      });
+      if (invalidTokens.length > 0) {
+        await db
+          .collection('users')
+          .doc(intent.uid)
+          .update({fcmTokens: FieldValue.arrayRemove(...invalidTokens)});
+      }
+    } catch (error) {
+      logger.warn('push delivery failed', {uid: intent.uid, error: `${error}`});
+    }
+  }
 }
 
 function fail(code: ErrorCode, message: string): never {
@@ -456,7 +529,9 @@ async function joinDaretHandler(
   const {db} = deps;
   const now = deps.now();
 
-  return db.runTransaction(async (transaction) => {
+  let memberJoinedPush: PushIntent | undefined;
+
+  const result = await db.runTransaction(async (transaction) => {
     const inviteSnapshot = await transaction.get(db.collection('invites').doc(context.data.code));
     const invite = requireExistingData(inviteSnapshot, 'invite');
     requireValidInvite(invite, now);
@@ -598,9 +673,22 @@ async function joinDaretHandler(
       }),
       {merge: true},
     );
+    memberJoinedPush = {
+      uid: requireString(daret, 'adminUid'),
+      title: requireString(daret, 'nom'),
+      body: `${profile.prenom} a rejoint le daret`,
+      action: 'member',
+      daretId,
+    };
     logger.info('joinDaret completed', {daretId, uid: context.uid});
     return {daretId, joined: true};
   });
+
+  if (result.joined && memberJoinedPush !== undefined) {
+    await deps.sendPush?.([memberJoinedPush]);
+  }
+
+  return result;
 }
 
 async function approveDaretHandler(
@@ -716,14 +804,21 @@ async function activateDaretFromApprovals(
     daretId: string;
     actorUid: string;
     now: Timestamp;
+    periodPlans?: PeriodPlan[];
+    memberUids?: string[];
   },
 ): Promise<void> {
   const currentPeriode = requirePositiveInteger(input.daret, 'currentPeriode');
   if (currentPeriode !== 1) {
     fail('failed-precondition', 'Pending darets must start at period 1.');
   }
-  const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
-  const periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
+
+  let periodPlans = input.periodPlans;
+  if (periodPlans === undefined) {
+    const periodsSnapshot = await transaction.get(daretRef.collection('periods'));
+    periodPlans = periodsSnapshot.docs.map(readPeriodPlan);
+  }
+
   const currentPlan = periodPlans.find((plan) => plan.index === 1);
   if (currentPlan === undefined) {
     fail('failed-precondition', 'Period 1 is missing.');
@@ -732,7 +827,7 @@ async function activateDaretFromApprovals(
     transaction,
     daretRef,
     currentPlan,
-    requireStringArray(input.daret, 'memberUids'),
+    input.memberUids ?? requireStringArray(input.daret, 'memberUids'),
     requirePositiveInteger(input.daret, 'montant'),
     periodPlans,
   );
@@ -915,7 +1010,10 @@ async function sendNudgeHandler(
   const daretRef = db.collection('darets').doc(context.data.daretId);
   const periodRef = daretRef.collection('periods').doc(periodId(context.data.periodIndex));
 
-  return db.runTransaction(async (transaction) => {
+  let pushDaretNom = '';
+  let pushMontant = 0;
+
+  const result = await db.runTransaction(async (transaction) => {
     const daretSnapshot = await transaction.get(daretRef);
     const daret = requireExistingData(daretSnapshot, 'daret');
     const periodSnapshot = await transaction.get(periodRef);
@@ -932,6 +1030,8 @@ async function sendNudgeHandler(
     if (optionalString(contribution, 'state') === 'confirme') {
       fail('failed-precondition', 'Confirmed contributions cannot be nudged.');
     }
+    pushDaretNom = requireString(daret, 'nom');
+    pushMontant = requirePositiveInteger(daret, 'montant');
 
     const activityId = `nudge-${periodId(context.data.periodIndex)}-${context.data.targetUid}-${dateKey(
       now,
@@ -968,6 +1068,18 @@ async function sendNudgeHandler(
     });
     return {sent: true};
   });
+
+  await deps.sendPush?.([
+    {
+      uid: context.data.targetUid,
+      title: pushDaretNom,
+      body: `Rappel: payez ${pushMontant} DH`,
+      action: 'pay',
+      daretId: context.data.daretId,
+    },
+  ]);
+
+  return result;
 }
 
 async function reorderPeriodsHandler(
@@ -1134,6 +1246,12 @@ async function replaceMemberHandler(
     const fromContributionSnapshot = await transaction.get(fromContributionRef);
     const fromMemberSnapshot = await transaction.get(daretRef.collection('members').doc(fromUid));
 
+    let currentMembers: FirestoreData[] | undefined;
+    if (status === 'attente' && toUid !== undefined) {
+      const currentMembersSnapshot = await transaction.get(daretRef.collection('members'));
+      currentMembers = currentMembersSnapshot.docs.map((doc) => doc.data());
+    }
+
     // All reads must precede writes: resolve the replacement identity now.
     // Direct mode replaces with an existing account; placeholder mode opens a
     // vacant seat and reserves a fresh invite code for whoever fills it.
@@ -1241,6 +1359,25 @@ async function replaceMemberHandler(
         {merge: true},
       );
     }
+
+    if (status === 'attente' && toUid !== undefined && currentMembers !== undefined) {
+      const approvedCount = currentMembers.filter(
+        (doc) => doc.uid !== fromUid && optionalString(doc, 'approvalStatus') === 'approved',
+      ).length;
+      if (approvedCount === periodesCount - 1) {
+        await activateDaretFromApprovals(transaction, daretRef, {
+          daret,
+          daretId: context.data.daretId,
+          actorUid: context.uid,
+          now,
+          periodPlans: nextPlans,
+          // Use the swapped roster (placeholder → newcomer) that matches
+          // nextPlans; the daret snapshot still holds the old memberUids.
+          memberUids: nextMemberUids,
+        });
+      }
+    }
+
     transaction.set(
       daretRef.collection('activity').doc(`replace-${fromUid}-${newUid}`),
       activityDocument({
@@ -1449,6 +1586,7 @@ async function dailyRemindersHandler(deps: HandlerDeps): Promise<void> {
   const now = deps.now();
   const activeDarets = await db.collection('darets').where('statut', '==', 'actif').get();
   const batch = db.batch();
+  const pushIntents: PushIntent[] = [];
   let writes = 0;
 
   for (const daretDoc of activeDarets.docs) {
@@ -1497,12 +1635,23 @@ async function dailyRemindersHandler(deps: HandlerDeps): Promise<void> {
         {merge: true},
       );
       writes += 1;
+      pushIntents.push({
+        uid: contributionDoc.id,
+        title: requireString(daret, 'nom'),
+        body:
+          state === 'retard'
+            ? `En retard: payez ${requirePositiveInteger(daret, 'montant')} DH`
+            : `Payez ${requirePositiveInteger(daret, 'montant')} DH`,
+        action: 'pay',
+        daretId: daretDoc.id,
+      });
     }
   }
 
   if (writes > 0) {
     await batch.commit();
   }
+  await deps.sendPush?.(pushIntents);
   logger.info('dailyReminders completed', {writes});
 }
 
